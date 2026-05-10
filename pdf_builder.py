@@ -95,12 +95,20 @@ def draw_header(c: Canvas, lesson_type: str, day: str, date: str,
     logo_x = MARGIN
     if logo_path:
         try:
+            # Logo is landscape — fit height to LABEL_H, derive width from aspect ratio
+            from PIL import Image as PILImage
+            _img = PILImage.open(logo_path)
+            _ar  = _img.width / _img.height
+            logo_h = LABEL_H - 2 * mm
+            logo_w = logo_h * _ar
             c.drawImage(logo_path, logo_x, bar_y + 1 * mm,
-                        width=LOGO_W, height=LABEL_H - 2 * mm,
+                        width=logo_w, height=logo_h,
                         preserveAspectRatio=True, mask='auto')
         except Exception:
-            pass
-    bar_x_start = MARGIN + LOGO_W + 1.5 * mm
+            logo_w = LOGO_W
+    else:
+        logo_w = 0
+    bar_x_start = MARGIN + logo_w + 1.5 * mm
 
     # ── reader icon (right of bar) ────────────────────────────────────────────
     icon_x = W - MARGIN - ICON_W

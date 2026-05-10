@@ -35,13 +35,13 @@ st.set_page_config(
 
 # ── header ────────────────────────────────────────────────────────────────────
 
-col_logo, col_title = st.columns([1, 6])
+col_logo, col_title = st.columns([2, 5])
 with col_logo:
     if Path(LOGO_PATH).exists():
-        st.image(LOGO_PATH, width=70)
+        st.image(LOGO_PATH, width=160)
 with col_title:
     st.title('Being a Reader')
-    st.caption('Reading lesson resource generator — Wallscourt Farm Academy')
+    st.caption('Reading lesson resource generator')
 
 st.divider()
 
@@ -57,11 +57,10 @@ if 'lesson_data' not in st.session_state:
 def fmt_date(d: datetime.date) -> str:
     return d.strftime('%d/%m/%Y')
 
-DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-
-def _next_weekday(weekday: int) -> datetime.date:
+def next_weekday(n: int) -> datetime.date:
+    """Return the next occurrence of weekday n (0=Mon … 4=Fri)."""
     today = datetime.date.today()
-    days_ahead = weekday - today.weekday()
+    days_ahead = n - today.weekday()
     if days_ahead <= 0:
         days_ahead += 7
     return today + datetime.timedelta(days=days_ahead)
@@ -80,31 +79,22 @@ with st.form('lesson_form'):
     key_question = st.text_input('Key question',
                                  placeholder='How do scientists investigate sound?')
 
-    st.subheader('Lesson days')
+    st.subheader('Lesson dates')
+    st.caption('Pick the date for each lesson — the day is worked out automatically.')
 
-    st.markdown('**Lesson 1 — Vocabulary**')
-    c1a, c1b = st.columns(2)
-    with c1a:
-        day1 = st.selectbox('Day', DAYS, index=1, key='day1')
-    with c1b:
-        date1 = st.date_input('Date', value=_next_weekday(1), key='date1',
-                               format='DD/MM/YYYY')
-
-    st.markdown('**Lesson 2 — Retrieval**')
-    c2a, c2b = st.columns(2)
-    with c2a:
-        day2 = st.selectbox('Day', DAYS, index=3, key='day2')
-    with c2b:
-        date2 = st.date_input('Date', value=_next_weekday(3), key='date2',
-                               format='DD/MM/YYYY')
-
-    st.markdown('**Lesson 3 — Inference**')
-    c3a, c3b = st.columns(2)
-    with c3a:
-        day3 = st.selectbox('Day', DAYS, index=4, key='day3')
-    with c3b:
-        date3 = st.date_input('Date', value=_next_weekday(4), key='date3',
-                               format='DD/MM/YYYY')
+    col_v, col_r, col_i = st.columns(3)
+    with col_v:
+        st.markdown('**Lesson 1**  \nVocabulary')
+        date1 = st.date_input('', value=next_weekday(1), key='date1', format='DD/MM/YYYY',
+                              label_visibility='collapsed')
+    with col_r:
+        st.markdown('**Lesson 2**  \nRetrieval')
+        date2 = st.date_input('', value=next_weekday(3), key='date2', format='DD/MM/YYYY',
+                              label_visibility='collapsed')
+    with col_i:
+        st.markdown('**Lesson 3**  \nInference')
+        date3 = st.date_input('', value=next_weekday(4), key='date3', format='DD/MM/YYYY',
+                              label_visibility='collapsed')
 
     generate_btn = st.form_submit_button('✨ Generate content', use_container_width=True)
 
@@ -124,9 +114,9 @@ if generate_btn:
     with st.spinner('Generating lesson content with Claude…'):
         try:
             lesson_days = [
-                {'day': day1, 'date': fmt_date(date1)},
-                {'day': day2, 'date': fmt_date(date2)},
-                {'day': day3, 'date': fmt_date(date3)},
+                {'day': date1.strftime('%A'), 'date': fmt_date(date1)},
+                {'day': date2.strftime('%A'), 'date': fmt_date(date2)},
+                {'day': date3.strftime('%A'), 'date': fmt_date(date3)},
             ]
             data = generate_lesson_content(topic, key_question, week_ref, lesson_days)
             data['week']         = week_ref
@@ -152,10 +142,9 @@ if st.session_state['generated'] and st.session_state['lesson_data']:
     lesson_types = ['Vocabulary', 'Retrieval', 'Inference']
     for i, lesson in enumerate(data.get('lessons', [])):
         ltype = lesson.get('type', lesson_types[i])
-        with st.expander(
-            f'Lesson {i+1} – {ltype}  ({lesson.get("day","")} {lesson.get("date","")})',
-            expanded=(i == 0)
-        ):
+        day   = lesson.get('day', '')
+        date  = lesson.get('date', '')
+        with st.expander(f'Lesson {i+1} — {ltype}  ({day} {date})', expanded=(i == 0)):
             st.markdown('**Vocabulary (5 words)**')
             for entry in lesson.get('vocab', []):
                 st.markdown(f"- **{entry.get('word','')}** — {entry.get('definition','')}")
