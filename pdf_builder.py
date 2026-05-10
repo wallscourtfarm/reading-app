@@ -26,8 +26,6 @@ BOX_BORDER = HexColor('#2c2c6c')
 BOX_BG     = HexColor('#f0f0f8')
 GREEN      = HexColor('#1a7a1a')
 DARK       = HexColor('#222222')
-LABEL_BG   = HexColor('#2c2c6c')
-LABEL_FG   = white
 
 # ── learning label data ───────────────────────────────────────────────────────
 
@@ -74,113 +72,90 @@ def _wrap_text(text: str, font: str, size: float, max_w: float, canvas: Canvas) 
     return lines or [text]
 
 
+ICON_SMALL  = 6 * mm    # reader icon size in the LP header row
+
 def draw_header(c: Canvas, lesson_type: str, day: str, date: str,
                 key_question: str, icon_path: str, y_top: float,
                 logo_path: str | None = None) -> float:
     """
-    Draw the school learning-label header.
-    Returns y position BELOW the header (ready for first content element).
+    Draw the school learning-label header matching the standard LP format.
+    logo_path is ignored — the PDF header has no school logo.
 
-    Layout:
-      [school logo] [blue bar: Being a Reader | TYPE | DAY DATE] [reader icon]
-      Key question: QUESTION TEXT  (bold, underlined, dark blue)
-      LF: ...  (italic)
-      I can ...  (italic)
-      I can ...  (italic)
+    Layout (matches T5W4 reference):
+      Key Question [icon] Day Date          ← one line, plain + bold label
       ─────── thin rule ──────────
+      Key question text                     ← bold, underlined, dark blue
+      LF: ...                               ← plain
+      I can ...                             ← plain
+      I can ...                             ← plain
     """
-    bar_y  = y_top - LABEL_H
+    y = y_top
 
-    # ── school logo (left of bar) ─────────────────────────────────────────────
-    logo_x = MARGIN
-    logo_w = 0
-    if logo_path and os.path.exists(logo_path):
-        try:
-            from PIL import Image as PILImage
-            import tempfile as _tf
-            _img = PILImage.open(logo_path)
-            # Flatten RGBA/P to RGB so ReportLab can embed it
-            if _img.mode in ('RGBA', 'P'):
-                _bg = PILImage.new('RGB', _img.size, (255, 255, 255))
-                _bg.paste(_img, mask=(_img.split()[3] if _img.mode == 'RGBA' else None))
-                _img = _bg
-            elif _img.mode != 'RGB':
-                _img = _img.convert('RGB')
-            _ar    = _img.width / _img.height
-            logo_h = LABEL_H - 2 * mm
-            logo_w = logo_h * _ar
-            with _tf.NamedTemporaryFile(suffix='.png', delete=False) as _t:
-                _tmp = _t.name
-            _img.save(_tmp, 'PNG')
-            c.drawImage(_tmp, logo_x, bar_y + 1 * mm,
-                        width=logo_w, height=logo_h,
-                        preserveAspectRatio=True, mask='auto')
-            os.unlink(_tmp)
-        except Exception:
-            logo_w = 0
-    bar_x_start = MARGIN + logo_w + 1.5 * mm
+    # ── Row 1: "Key Question" label | icon | date ─────────────────────────────
+    row_font_size = 10
+    label_text    = 'Key Question'
+    date_text     = f'{day} {date}'
 
-    # ── reader icon (right of bar) ────────────────────────────────────────────
-    icon_x = W - MARGIN - ICON_W
+    # "Key Question" bold on left
+    c.setFont('Helvetica-Bold', row_font_size)
+    c.setFillColor(DARK)
+    c.drawString(MARGIN, y, label_text)
+    label_w = c.stringWidth(label_text, 'Helvetica-Bold', row_font_size)
+
+    # Small reader icon immediately after label
+    icon_x = MARGIN + label_w + 2 * mm
     try:
-        c.drawImage(icon_path, icon_x, bar_y + 1 * mm,
-                    width=ICON_W, height=LABEL_H - 2 * mm,
+        c.drawImage(icon_path, icon_x, y - 1 * mm,
+                    width=ICON_SMALL, height=ICON_SMALL,
                     preserveAspectRatio=True, mask='auto')
     except Exception:
         pass
-    bar_x_end = icon_x - 1.5 * mm
 
-    # ── coloured bar ──────────────────────────────────────────────────────────
-    bar_w = bar_x_end - bar_x_start
-    c.setFillColor(LABEL_BG)
-    c.rect(bar_x_start, bar_y, bar_w, LABEL_H, fill=1, stroke=0)
+    # Date right-aligned
+    c.setFont('Helvetica', row_font_size)
+    date_w = c.stringWidth(date_text, 'Helvetica', row_font_size)
+    c.drawString(W - MARGIN - date_w, y, date_text)
 
-    c.setFillColor(LABEL_FG)
-    c.setFont('Helvetica-Bold', 9)
-    bar_label = f'Being a Reader  |  {lesson_type}  |  {day}  {date}'
-    c.drawString(bar_x_start + 3 * mm, bar_y + (LABEL_H / 2) - 2.5 * mm, bar_label)
+    y -= ICON_SMALL + 1 * mm
 
-    y = bar_y - LABEL_GAP
+    # ── Thin rule ─────────────────────────────────────────────────────────────
+    c.setStrokeColor(HexColor('#cccccc'))
+    c.setLineWidth(0.5)
+    c.line(MARGIN, y, W - MARGIN, y)
+    y -= 4 * mm
 
-    # ── key question (bold, underlined, dark blue) ────────────────────────────
-    kq_font, kq_size = 'Helvetica-Bold', 10
-    kq_full = f'Key question: {key_question}'
-    max_kq_w = CW
-    lines = _wrap_text(kq_full, kq_font, kq_size, max_kq_w, c)
-    line_h = kq_size * 1.3 / 72 * 25.4 * mm   # pt → mm (approx)
-
+    # ── Key question: bold, underlined, dark blue ─────────────────────────────
+    kq_font, kq_size = 'Helvetica-Bold', 11
     c.setFont(kq_font, kq_size)
     c.setFillColor(BOX_BORDER)
-    for line in lines:
+
+    kq_lines  = _wrap_text(key_question, kq_font, kq_size, CW, c)
+    kq_line_h = kq_size * 1.25 / 72 * 25.4 * mm
+
+    for line in kq_lines:
         c.drawString(MARGIN, y, line)
         lw = c.stringWidth(line, kq_font, kq_size)
-        c.setLineWidth(0.5)
+        c.setLineWidth(0.6)
         c.setStrokeColor(BOX_BORDER)
-        c.line(MARGIN, y - 0.8 * mm, MARGIN + lw, y - 0.8 * mm)
-        y -= line_h + 0.5 * mm
-    y -= 1.5 * mm
+        c.line(MARGIN, y - 1 * mm, MARGIN + lw, y - 1 * mm)
+        y -= kq_line_h + 0.5 * mm
+    y -= 2 * mm
 
-    # ── LF + I can statements (italic) ───────────────────────────────────────
-    lc = LESSON_LABEL_DATA.get(lesson_type, {})
+    # ── LF and I can statements: plain, dark ─────────────────────────────────
+    lc    = LESSON_LABEL_DATA.get(lesson_type, {})
     lf    = lc.get('lf', '')
     ican1 = lc.get('ican1', '')
     ican2 = lc.get('ican2', '')
 
-    c.setFont('Helvetica-Oblique', 9)
+    c.setFont('Helvetica', 9.5)
     c.setFillColor(DARK)
-    lc_line_h = 9 * 1.3 / 72 * 25.4 * mm
+    lc_line_h = 9.5 * 1.3 / 72 * 25.4 * mm
 
-    for text in (f'LF: {lf}', f'I can {ican1}.', f'I can {ican2}.'):
+    for text in (f'LF: {lf}', f'I can {ican1}', f'I can {ican2}'):
         c.drawString(MARGIN, y, text)
-        y -= lc_line_h + 0.3 * mm
-    y -= 1.5 * mm
+        y -= lc_line_h
 
-    # ── thin rule ─────────────────────────────────────────────────────────────
-    c.setStrokeColor(BOX_BORDER)
-    c.setLineWidth(0.4)
-    c.line(MARGIN, y, W - MARGIN, y)
     y -= 3 * mm
-
     return y
 
 
