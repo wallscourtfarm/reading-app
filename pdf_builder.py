@@ -93,21 +93,31 @@ def draw_header(c: Canvas, lesson_type: str, day: str, date: str,
 
     # ── school logo (left of bar) ─────────────────────────────────────────────
     logo_x = MARGIN
-    if logo_path:
+    logo_w = 0
+    if logo_path and os.path.exists(logo_path):
         try:
-            # Logo is landscape — fit height to LABEL_H, derive width from aspect ratio
             from PIL import Image as PILImage
+            import tempfile as _tf
             _img = PILImage.open(logo_path)
-            _ar  = _img.width / _img.height
+            # Flatten RGBA/P to RGB so ReportLab can embed it
+            if _img.mode in ('RGBA', 'P'):
+                _bg = PILImage.new('RGB', _img.size, (255, 255, 255))
+                _bg.paste(_img, mask=(_img.split()[3] if _img.mode == 'RGBA' else None))
+                _img = _bg
+            elif _img.mode != 'RGB':
+                _img = _img.convert('RGB')
+            _ar    = _img.width / _img.height
             logo_h = LABEL_H - 2 * mm
             logo_w = logo_h * _ar
-            c.drawImage(logo_path, logo_x, bar_y + 1 * mm,
+            with _tf.NamedTemporaryFile(suffix='.png', delete=False) as _t:
+                _tmp = _t.name
+            _img.save(_tmp, 'PNG')
+            c.drawImage(_tmp, logo_x, bar_y + 1 * mm,
                         width=logo_w, height=logo_h,
                         preserveAspectRatio=True, mask='auto')
+            os.unlink(_tmp)
         except Exception:
-            logo_w = LOGO_W
-    else:
-        logo_w = 0
+            logo_w = 0
     bar_x_start = MARGIN + logo_w + 1.5 * mm
 
     # ── reader icon (right of bar) ────────────────────────────────────────────
