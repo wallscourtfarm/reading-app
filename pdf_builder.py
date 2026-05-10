@@ -116,13 +116,7 @@ def draw_header(c: Canvas, lesson_type: str, day: str, date: str,
     date_w = c.stringWidth(date_text, 'Helvetica', row_font_size)
     c.drawString(W - MARGIN - date_w, y, date_text)
 
-    y -= ICON_SMALL + 1 * mm
-
-    # ── Thin rule ─────────────────────────────────────────────────────────────
-    c.setStrokeColor(HexColor('#cccccc'))
-    c.setLineWidth(0.5)
-    c.line(MARGIN, y, W - MARGIN, y)
-    y -= 4 * mm
+    y -= ICON_SMALL + 0.5 * mm
 
     # ── Key question: bold, underlined, dark blue ─────────────────────────────
     kq_font, kq_size = 'Helvetica-Bold', 11
