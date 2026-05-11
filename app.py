@@ -109,10 +109,13 @@ topic = st.text_input(
     "Topic / text focus",
     placeholder="e.g. Anglo-Saxons, Sound waves, Charlotte's Web chapter 3",
 )
-key_question = st.text_input(
-    "Key question",
-    placeholder="e.g. What can objects tell us about how Anglo-Saxons lived?",
-)
+if mode == "Lesson Mode":
+    key_question = st.text_input(
+        "Key question",
+        placeholder="e.g. What can objects tell us about how Anglo-Saxons lived?",
+    )
+else:
+    key_question = ""
 st.divider()
 
 # ---------------------------------------------------------------------------
@@ -222,7 +225,7 @@ if mode == "Lesson Mode":
 # ---------------------------------------------------------------------------
 # Generate button
 # ---------------------------------------------------------------------------
-ready = bool(topic.strip()) and bool(key_question.strip())
+ready = bool(topic.strip()) and (bool(key_question.strip()) if mode == 'Lesson Mode' else True)
 if not ready:
     st.info("Enter a topic and key question to continue.")
 
@@ -266,6 +269,7 @@ if st.button("Generate resources", type="primary",
                 st.stop()
 
     generated_text = content.get("standard_text", "")
+    content["topic"] = topic  # used as fallback title in reading paper PDF
     for lesson in content.get("lessons", []):
         lesson["text"] = generated_text
 

@@ -345,11 +345,10 @@ def _build_reading_paper_prompt(
     type_r = _type_restriction(question_types)
     layout_r = _layout_restriction(question_layouts)
 
+    title_line = f"\nKEY QUESTION: {key_question}" if key_question.strip() else ""
     return f"""TOPIC: {topic}{context_line}
 TEXT_LENGTH: {word_count} words
-NUMBER OF QUESTIONS: {num_questions}{type_r}{layout_r}
-
-KEY QUESTION: {key_question}
+NUMBER OF QUESTIONS: {num_questions}{type_r}{layout_r}{title_line}
 
 Generate exactly {num_questions} questions now. ONLY valid JSON — no markdown fences."""
 

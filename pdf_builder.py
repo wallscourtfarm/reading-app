@@ -1199,7 +1199,7 @@ def build_reading_paper_pdfs(
     import tempfile, shutil
 
     tmp = tempfile.mkdtemp()
-    key_q = content.get("key_question", "")
+    key_q = content.get("key_question", "") or content.get("topic", "")
     text = content.get("standard_text", "")
     questions = content.get("questions", [])
 
@@ -1241,15 +1241,24 @@ def build_reading_paper_pdfs(
         page_num += 1
         p = os.path.join(tmp, f"rp_q_p{page_num}.pdf")
         c = rl_canvas.Canvas(p, pagesize=A4)
-        if is_first and _draw_rp_label:
-            y = _draw_rp_label(c)
+        if is_first:
+            # Name space — top right
+            name_y = H - MARGIN - 3 * mm
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(*DARK)
+            name_line = "Name:  ___________________________________"
+            c.drawRightString(MARGIN + CW, name_y, name_line)
+
+            if _draw_rp_label:
+                y = _draw_rp_label(c)
+            else:
+                y = H - MARGIN - 14 * mm  # clear of name line
         else:
             y = H - MARGIN - 4 * mm
-            if not is_first:
-                c.setFont("Helvetica-Oblique", 7.5)
-                c.setFillColorRGB(0.5, 0.5, 0.5)
-                c.drawRightString(MARGIN + CW, y + 1 * mm, "continued…")
-                y -= 5 * mm
+            c.setFont("Helvetica-Oblique", 7.5)
+            c.setFillColorRGB(0.5, 0.5, 0.5)
+            c.drawRightString(MARGIN + CW, y + 1 * mm, "continued…")
+            y -= 5 * mm
         return c, y, p
 
     c, y, path = new_q_page(is_first=True)
