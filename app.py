@@ -53,9 +53,9 @@ I_CAN = {
 }
 
 TEXT_LENGTHS = {
-    "Standard (~250 words)":  "standard",
-    "Extended (~500 words)":  "extended",
-    "Long (~750 words)":      "long",
+    "Standard (~250 words)": "standard",
+    "Extended (~500 words)": "extended",
+    "Long (~750 words)":     "long",
 }
 
 
@@ -71,7 +71,6 @@ def _next_weekday(weekday):
 
 
 def _checkbox_grid(labels, key_prefix):
-    """Render a 3-column checkbox grid. Returns list of checked labels."""
     cols = st.columns(3)
     checked = []
     for i, label in enumerate(labels):
@@ -79,6 +78,19 @@ def _checkbox_grid(labels, key_prefix):
             checked.append(label)
     return checked
 
+
+def _read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+# ---------------------------------------------------------------------------
+# Session state initialisation
+# ---------------------------------------------------------------------------
+if "downloads" not in st.session_state:
+    st.session_state.downloads = []   # list of (label, bytes, mime, filename)
+if "preview_text" not in st.session_state:
+    st.session_state.preview_text = ""
 
 # ---------------------------------------------------------------------------
 # Header
@@ -103,7 +115,7 @@ mode = st.radio(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Topic and key question (both modes)
+# Topic + key question
 # ---------------------------------------------------------------------------
 topic = st.text_input(
     "Topic / text focus",
@@ -139,7 +151,7 @@ if mode == "Lesson Mode":
     st.divider()
 
 # ---------------------------------------------------------------------------
-# b) Text length (both modes)
+# b) Text length
 # ---------------------------------------------------------------------------
 st.markdown("#### Text length")
 tl_label = st.radio(
@@ -193,13 +205,12 @@ if ql_choice == "Select specific layouts":
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Lesson Mode extras — learning label + output selection
+# Lesson Mode extras
 # ---------------------------------------------------------------------------
-include_label = False
 if mode == "Lesson Mode":
     st.markdown("#### Learning label")
     include_label = st.checkbox(
-        "Include learning label on each lesson (added automatically per lesson type)",
+        "Include learning label (added automatically per lesson type)",
         value=True,
     )
 
@@ -219,18 +230,23 @@ if mode == "Lesson Mode":
         label_visibility="collapsed",
     )
     layout = "sats" if "Separate" in layout_label else "integrated"
-
     st.divider()
 
 # ---------------------------------------------------------------------------
 # Generate button
 # ---------------------------------------------------------------------------
-ready = bool(topic.strip()) and (bool(key_question.strip()) if mode == 'Lesson Mode' else True)
+ready = bool(topic.strip()) and (
+    bool(key_question.strip()) if mode == "Lesson Mode" else True
+)
 if not ready:
     st.info("Enter a topic and key question to continue.")
 
 if st.button("Generate resources", type="primary",
              disabled=not ready, use_container_width=True):
+
+    # Clear any previous downloads
+    st.session_state.downloads = []
+    st.session_state.preview_text = ""
 
     if mode == "Lesson Mode":
         with st.spinner("Generating reading extract and lessons… (20–40 seconds)"):
@@ -253,7 +269,6 @@ if st.button("Generate resources", type="primary",
             except Exception as e:
                 st.error(f"Generation failed: {e}")
                 st.stop()
-
     else:
         with st.spinner(f"Generating reading paper ({num_questions} questions)… (20–50 seconds)"):
             try:
@@ -269,12 +284,19 @@ if st.button("Generate resources", type="primary",
                 st.stop()
 
     generated_text = content.get("standard_text", "")
-    content["topic"] = topic  # used as fallback title in reading paper PDF
+    content["topic"] = topic
     for lesson in content.get("lessons", []):
         lesson["text"] = generated_text
+    st.session_state.preview_text = generated_text
 
     tmp = tempfile.mkdtemp()
     try:
+        PDF_MIME = "application/pdf"
+        PPTX_MIME = ("application/vnd.openxmlformats-officedocument"
+                     ".presentationml.presentation")
+        XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
+                     ".spreadsheetml.sheet")
+
         if mode == "Lesson Mode":
             week_ref = voc_date.strftime("%d%b").upper()
 
@@ -286,22 +308,48 @@ if st.button("Generate resources", type="primary",
                     layout=layout,
                 )
 
-            pptx_path = None
+            if out_standard and "standard" in pdf_paths:
+                st.session_state.downloads.append((
+                    "📄 Standard Pupil PDF", _read_bytes(pdf_paths["standard"]),
+                    PDF_MIME, f"BeingAReader_{week_ref}_Standard.pdf"
+                ))
+            if out_supported and "supported" in pdf_paths:
+                st.session_state.downloads.append((
+                    "📄 Supported Pupil PDF", _read_bytes(pdf_paths["supported"]),
+                    PDF_MIME, f"BeingAReader_{week_ref}_Supported.pdf"
+                ))
+            if out_answers and "answers" in pdf_paths:
+                st.session_state.downloads.append((
+                    "📄 All Answers PDF", _read_bytes(pdf_paths["answers"]),
+                    PDF_MIME, f"BeingAReader_{week_ref}_Answers.pdf"
+                ))
+            if layout == "sats" and "text_booklet" in pdf_paths:
+                st.session_state.downloads.append((
+                    "📄 Text Booklet", _read_bytes(pdf_paths["text_booklet"]),
+                    PDF_MIME, f"BeingAReader_{week_ref}_TextBooklet.pdf"
+                ))
+
             if out_pptx and PPTX_AVAILABLE and TEMPLATE_PATH.exists():
                 with st.spinner("Building PPTX…"):
                     pptx_path = os.path.join(tmp, "Teaching_Slides.pptx")
                     try:
                         build_pptx(content=content, template_path=str(TEMPLATE_PATH),
                                     output_path=pptx_path)
+                        st.session_state.downloads.append((
+                            "📊 Teaching PPTX", _read_bytes(pptx_path),
+                            PPTX_MIME, f"BeingAReader_{week_ref}_Teaching.pptx"
+                        ))
                     except Exception as e:
                         st.warning(f"PPTX skipped: {e}")
-                        pptx_path = None
 
-            xlsx_path = None
             if out_xlsx:
                 with st.spinner("Building Excel…"):
                     xlsx_path = os.path.join(tmp, "Reading_Content.xlsx")
                     build_excel(content=content, output_path=xlsx_path)
+                    st.session_state.downloads.append((
+                        "📊 Content XLSX", _read_bytes(xlsx_path),
+                        XLSX_MIME, f"BeingAReader_{week_ref}_Content.xlsx"
+                    ))
 
         else:
             week_ref = date.today().strftime("%d%b").upper()
@@ -314,68 +362,40 @@ if st.button("Generate resources", type="primary",
                     include_label=False,
                     custom_label="",
                 )
-            pptx_path = None
-            xlsx_path = None
 
-        if generated_text:
-            with st.expander("Preview reading extract"):
-                st.write(generated_text)
-
-        st.success("Done!")
-        st.divider()
-
-        downloads = []
-
-        if mode == "Lesson Mode":
-            if out_standard and "standard" in pdf_paths:
-                downloads.append((pdf_paths["standard"], "📄 Standard Pupil",
-                                   "application/pdf",
-                                   f"BeingAReader_{week_ref}_Standard.pdf"))
-            if out_supported and "supported" in pdf_paths:
-                downloads.append((pdf_paths["supported"], "📄 Supported Pupil",
-                                   "application/pdf",
-                                   f"BeingAReader_{week_ref}_Supported.pdf"))
-            if out_answers and "answers" in pdf_paths:
-                downloads.append((pdf_paths["answers"], "📄 All Answers",
-                                   "application/pdf",
-                                   f"BeingAReader_{week_ref}_Answers.pdf"))
-            if layout == "sats" and "text_booklet" in pdf_paths:
-                downloads.append((pdf_paths["text_booklet"], "📄 Text Booklet",
-                                   "application/pdf",
-                                   f"BeingAReader_{week_ref}_TextBooklet.pdf"))
-            if pptx_path and os.path.exists(pptx_path):
-                downloads.append((pptx_path, "📊 Teaching PPTX",
-                                   "application/vnd.openxmlformats-officedocument"
-                                   ".presentationml.presentation",
-                                   f"BeingAReader_{week_ref}_Teaching.pptx"))
-        else:
-            downloads.append((pdf_paths["text"],        "📄 Text",
-                               "application/pdf", f"ReadingPaper_{week_ref}_Text.pdf"))
-            downloads.append((pdf_paths["questions"],   "📄 Questions",
-                               "application/pdf", f"ReadingPaper_{week_ref}_Questions.pdf"))
-            downloads.append((pdf_paths["mark_scheme"], "📄 Mark Scheme",
-                               "application/pdf", f"ReadingPaper_{week_ref}_MarkScheme.pdf"))
-
-        if downloads:
-            cols = st.columns(min(len(downloads), 4))
-            for i, (path, label, mime, filename) in enumerate(downloads):
-                col = cols[i % len(cols)]
-                if path and os.path.exists(path):
-                    with open(path, "rb") as f:
-                        col.download_button(label=label, data=f.read(),
-                                            file_name=filename, mime=mime,
-                                            use_container_width=True)
-
-        if xlsx_path and os.path.exists(xlsx_path):
-            with open(xlsx_path, "rb") as f:
-                st.download_button(
-                    label="📊 Content XLSX", data=f.read(),
-                    file_name=f"BeingAReader_{week_ref}_Content.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+            st.session_state.downloads.append((
+                "📄 Text", _read_bytes(pdf_paths["text"]),
+                PDF_MIME, f"ReadingPaper_{week_ref}_Text.pdf"
+            ))
+            st.session_state.downloads.append((
+                "📄 Questions", _read_bytes(pdf_paths["questions"]),
+                PDF_MIME, f"ReadingPaper_{week_ref}_Questions.pdf"
+            ))
+            st.session_state.downloads.append((
+                "📄 Mark Scheme", _read_bytes(pdf_paths["mark_scheme"]),
+                PDF_MIME, f"ReadingPaper_{week_ref}_MarkScheme.pdf"
+            ))
 
     finally:
-        try:
-            shutil.rmtree(tmp)
-        except Exception:
-            pass
+        shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# Downloads — rendered from session state, persist across reruns
+# ---------------------------------------------------------------------------
+if st.session_state.downloads:
+    st.divider()
+    if st.session_state.preview_text:
+        with st.expander("Preview reading extract"):
+            st.write(st.session_state.preview_text)
+
+    st.success("Resources ready — download any or all below.")
+    cols = st.columns(min(len(st.session_state.downloads), 4))
+    for i, (label, data, mime, filename) in enumerate(st.session_state.downloads):
+        cols[i % len(cols)].download_button(
+            label=label,
+            data=data,
+            file_name=filename,
+            mime=mime,
+            use_container_width=True,
+            key=f"dl_{i}_{filename}",   # stable key so buttons don't flicker
+        )
