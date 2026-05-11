@@ -1,468 +1,952 @@
 """
-pdf_builder.py  –  Generates Being a Reader PDFs using ReportLab.
-Produces 3 merged PDFs: Standard Pupil, Supported Pupil, All Answers.
-Each merged PDF has 3 pages (one per lesson).
+pdf_builder.py
+Consumes content dict from content_generator.py.
+Produces 3 merged PDFs:
+  - Standard Pupil  (Voc + Ret + Inf, 7 questions each)
+  - Supported Pupil (Voc + Ret + Inf, 5 questions each, with scaffolds)
+  - All Answers     (6 pages: Std + Sup for each lesson)
+
+Renders all 9 question formats:
+  open_line, find_and_copy, numbered_list,
+  tick_one, tick_two, true_false_table,
+  sequencing, reason_evidence_table, two_part_ab
 """
 
-import os, io
-from pathlib import Path
+import os
+import hashlib
+import random
+from io import BytesIO
+
 from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.units import mm
-from reportlab.pdfgen.canvas import Canvas
-from reportlab.lib.colors import Color, white, black, HexColor
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from pypdf import PdfReader, PdfWriter
 
-# ── dimensions ────────────────────────────────────────────────────────────────
-
-W, H = A4          # 595.28 × 841.89 pt
+# ---------------------------------------------------------------------------
+# Page geometry
+# ---------------------------------------------------------------------------
+W, H = A4
 MARGIN = 8 * mm
-CW = W - 2 * MARGIN
+CW = W - 2 * MARGIN        # usable content width
+MIN_Y = 14 * mm             # bottom margin — nothing drawn below this
 
-# ── colours ───────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Colours
+# ---------------------------------------------------------------------------
+BOX_BORDER = (0.173, 0.173, 0.424)   # #2c2c6c — borders, question labels
+BOX_BG     = (0.941, 0.941, 0.973)   # #f0f0f8 — reading text box
+GREEN      = (0.102, 0.478, 0.102)   # #1a7a1a — answer text and highlights
+DARK       = (0.133, 0.133, 0.133)   # body text
+GREY_LINE  = (0.6,   0.6,   0.6  )  # ruled lines, cell borders
+LIGHT_GREY = (0.94,  0.94,  0.94 )  # table cell backgrounds
+TICK_CELL  = (0.85,  0.95,  0.85 )  # answer highlight cell
 
-BOX_BORDER = HexColor('#2c2c6c')
-BOX_BG     = HexColor('#f0f0f8')
-GREEN      = HexColor('#1a7a1a')
-DARK       = HexColor('#222222')
 
-# ── learning label data ───────────────────────────────────────────────────────
+# ===========================================================================
+# Low-level drawing utilities
+# ===========================================================================
 
-# Fixed per lesson type — not AI-generated
-LESSON_LABEL_DATA = {
-    'Vocabulary': {
-        'lf':    'understand and explain the meaning of new words',
-        'ican1': 'find and explain the meaning of new vocabulary',
-        'ican2': 'use a new word accurately in a sentence',
-    },
-    'Retrieval': {
-        'lf':    'retrieve and record information from a text',
-        'ican1': 'locate specific information within a text',
-        'ican2': 'record what I have found using evidence from the text',
-    },
-    'Inference': {
-        'lf':    'make inferences using evidence from a text',
-        'ican1': 'read between the lines to work out meaning',
-        'ican2': 'explain my thinking using evidence from the text',
-    },
-}
-
-# ── learning label header ─────────────────────────────────────────────────────
-
-ICON_W   = 14 * mm
-LOGO_W   = 11 * mm
-LABEL_H  = 14 * mm   # taller to fit logo
-LABEL_GAP = 1.5 * mm
-
-def _wrap_text(text: str, font: str, size: float, max_w: float, canvas: Canvas) -> list[str]:
-    """Word-wrap text to fit max_w. Returns list of lines."""
-    words = text.split()
-    lines, cur = [], []
-    for word in words:
-        test = ' '.join(cur + [word])
-        if canvas.stringWidth(test, font, size) <= max_w:
-            cur.append(word)
+def wrap_text(c, text, font, size, max_w):
+    """Return list of lines that fit within max_w."""
+    words = str(text).split()
+    lines, line = [], ''
+    for w in words:
+        test = (line + ' ' + w).strip()
+        if c.stringWidth(test, font, size) <= max_w:
+            line = test
         else:
-            if cur:
-                lines.append(' '.join(cur))
-            cur = [word]
-    if cur:
-        lines.append(' '.join(cur))
-    return lines or [text]
+            if line:
+                lines.append(line)
+            line = w
+    if line:
+        lines.append(line)
+    return lines or ['']
 
 
-ICON_SMALL  = 6 * mm    # reader icon size in the LP header row
+def text_height(c, text, font, size, max_w, line_leading=1.35):
+    """Return height of wrapped text block in points."""
+    lines = wrap_text(c, text, font, size, max_w)
+    return len(lines) * size * line_leading
 
-def draw_header(c: Canvas, lesson_type: str, day: str, date: str,
-                key_question: str, icon_path: str, y_top: float,
-                logo_path: str | None = None) -> float:
-    """
-    Draw the school learning-label header matching the standard LP format.
-    logo_path is ignored — the PDF header has no school logo.
 
-    Layout (matches T5W4 reference):
-      Key Question [icon] Day Date          ← one line, plain + bold label
-      ─────── thin rule ──────────
-      Key question text                     ← bold, underlined, dark blue
-      LF: ...                               ← plain
-      I can ...                             ← plain
-      I can ...                             ← plain
-    """
-    y = y_top
+def draw_wrapped(c, text, font, size, x, y, max_w, line_leading=1.35):
+    """Draw wrapped text starting at (x, y). Returns y after last line."""
+    c.setFont(font, size)
+    lines = wrap_text(c, text, font, size, max_w)
+    for line in lines:
+        c.drawString(x, y, line)
+        y -= size * line_leading
+    return y
 
-    # ── Row 1: "Key Question" label | icon | date ─────────────────────────────
-    row_font_size = 10
-    label_text    = 'Key Question'
-    date_text     = f'{day} {date}'
 
-    # "Key Question" bold on left
-    c.setFont('Helvetica-Bold', row_font_size)
-    c.setFillColor(DARK)
-    c.drawString(MARGIN, y, label_text)
-    label_w = c.stringWidth(label_text, 'Helvetica-Bold', row_font_size)
+def draw_checkbox(c, x, y, size=4 * mm, filled=False, fill_colour=None):
+    """Draw a small square checkbox. Returns (right_edge, centre_y)."""
+    if filled and fill_colour:
+        c.setFillColorRGB(*fill_colour)
+        c.rect(x, y - size, size, size, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1) if not filled else None
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    c.rect(x, y - size, size, size, fill=0, stroke=1)
+    return x + size, y - size / 2
 
-    # Small reader icon immediately after label
-    icon_x = MARGIN + label_w + 2 * mm
+
+def marks_label(c, marks, y):
+    """Print 'N mark(s)' right-aligned at current y."""
+    label = f"{marks} mark" if marks == 1 else f"{marks} marks"
+    c.setFont("Helvetica-Oblique", 7)
+    c.setFillColorRGB(0.5, 0.5, 0.5)
+    c.drawRightString(MARGIN + CW, y, label)
+
+
+def draw_tick_instruction(c, instruction, y):
+    """Print 'Tick one.' or 'Tick two.' right-aligned."""
+    c.setFont("Helvetica-BoldOblique", 8)
+    c.setFillColorRGB(*BOX_BORDER)
+    c.drawRightString(MARGIN + CW, y, instruction)
+    return y - 4 * mm
+
+
+def draw_ruled_line(c, y, gap=6.5 * mm):
+    """Draw one answer line at y. Returns y below line."""
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    c.line(MARGIN, y - gap, MARGIN + CW, y - gap)
+    return y - gap
+
+
+def deterministic_shuffle(items):
+    """Shuffle a list reproducibly based on its own content."""
+    seed = int(hashlib.md5('|'.join(items).encode()).hexdigest()[:8], 16)
+    r = random.Random(seed)
+    result = list(items)
+    r.shuffle(result)
+    return result
+
+
+# ===========================================================================
+# Header
+# ===========================================================================
+
+def draw_header(c, lesson_type, day, date, key_q, i_can_statements, icon_path):
+    """Draw the learning label. Returns y immediately below the final rule."""
+    y = H - MARGIN
+
+    # Row 1: "Key Question"  [icon]  "Day Date"
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColorRGB(*DARK)
+    c.drawString(MARGIN, y - 5 * mm, "Key Question")
+
+    icon_x = MARGIN + 27 * mm
     try:
-        c.drawImage(icon_path, icon_x, y - 1 * mm,
-                    width=ICON_SMALL, height=ICON_SMALL,
-                    preserveAspectRatio=True, mask='auto')
+        c.drawImage(icon_path, icon_x, y - 7 * mm,
+                    width=7 * mm, height=7 * mm,
+                    mask='auto', preserveAspectRatio=True)
     except Exception:
         pass
 
-    # Date right-aligned
-    c.setFont('Helvetica', row_font_size)
-    date_w = c.stringWidth(date_text, 'Helvetica', row_font_size)
-    c.drawString(W - MARGIN - date_w, y, date_text)
+    c.setFont("Helvetica", 8)
+    c.drawString(icon_x + 8 * mm, y - 5 * mm, f"{day}  {date}")
+    y -= 8 * mm
 
-    y -= ICON_SMALL + 0.5 * mm
+    # Key question — bold, underlined, dark blue
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColorRGB(*BOX_BORDER)
+    c.drawString(MARGIN, y - 4 * mm, key_q)
+    kq_w = c.stringWidth(key_q, "Helvetica-Bold", 10)
+    c.setLineWidth(0.5)
+    c.setStrokeColorRGB(*BOX_BORDER)
+    c.line(MARGIN, y - 5 * mm, MARGIN + kq_w, y - 5 * mm)
+    y -= 7 * mm
 
-    # ── Key question: bold, underlined, dark blue ─────────────────────────────
-    kq_font, kq_size = 'Helvetica-Bold', 11
-    c.setFont(kq_font, kq_size)
-    c.setFillColor(BOX_BORDER)
+    # I can statements
+    c.setFont("Helvetica", 8)
+    c.setFillColorRGB(*DARK)
+    for ican in i_can_statements:
+        c.drawString(MARGIN, y - 3.5 * mm, ican)
+        y -= 4.5 * mm
 
-    kq_lines  = _wrap_text(key_question, kq_font, kq_size, CW, c)
-    kq_line_h = kq_size * 1.25 / 72 * 25.4 * mm
+    # Rule
+    y -= 1 * mm
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.5)
+    c.line(MARGIN, y, MARGIN + CW, y)
+    y -= 2.5 * mm
 
-    for line in kq_lines:
-        c.drawString(MARGIN, y, line)
-        lw = c.stringWidth(line, kq_font, kq_size)
-        c.setLineWidth(0.6)
-        c.setStrokeColor(BOX_BORDER)
-        c.line(MARGIN, y - 1 * mm, MARGIN + lw, y - 1 * mm)
-        y -= kq_line_h + 0.5 * mm
-    y -= 2 * mm
-
-    # ── LF and I can statements: plain, dark ─────────────────────────────────
-    lc    = LESSON_LABEL_DATA.get(lesson_type, {})
-    lf    = lc.get('lf', '')
-    ican1 = lc.get('ican1', '')
-    ican2 = lc.get('ican2', '')
-
-    c.setFont('Helvetica', 9.5)
-    c.setFillColor(DARK)
-    lc_line_h = 9.5 * 1.3 / 72 * 25.4 * mm
-
-    for text in (f'LF: {lf}', f'I can {ican1}', f'I can {ican2}'):
-        c.drawString(MARGIN, y, text)
-        y -= lc_line_h
-
-    y -= 3 * mm
     return y
 
 
-# ── text box ──────────────────────────────────────────────────────────────────
+# ===========================================================================
+# Reading text box
+# ===========================================================================
 
-def draw_textbox(c: Canvas, text: str, x: float, y: float,
-                 width: float, font_size: int = 10) -> float:
+def draw_text_box(c, text, y_top, font_size=10):
+    """Draw the reading extract box. Returns y below box."""
+    lines = wrap_text(c, text, "Helvetica", font_size, CW - 6 * mm)
+    lh = font_size * 1.4
+    box_h = len(lines) * lh + 6 * mm
+
+    c.setFillColorRGB(*BOX_BG)
+    c.setStrokeColorRGB(*BOX_BORDER)
+    c.setLineWidth(0.8)
+    c.roundRect(MARGIN, y_top - box_h, CW, box_h, 2 * mm, fill=1, stroke=1)
+
+    c.setFillColorRGB(*DARK)
+    c.setFont("Helvetica", font_size)
+    ty = y_top - 3.5 * mm - font_size * 0.72
+    for line in lines:
+        c.drawString(MARGIN + 3 * mm, ty, line)
+        ty -= lh
+
+    return y_top - box_h - 3 * mm
+
+
+# ===========================================================================
+# Question preamble (text_reference + question label)
+# ===========================================================================
+
+def draw_preamble(c, q, y):
     """
-    Draw a word-wrapped text block. Returns y below the block.
+    Draw text_reference (small grey italic) and question number + text.
+    Returns y after question text, and the indent width used for the number.
     """
-    from reportlab.platypus import Paragraph, Frame
-    from reportlab.lib.styles import ParagraphStyle
+    # text_reference
+    ref = q.get('text_reference', '').strip()
+    if ref:
+        c.setFont("Helvetica-Oblique", 7.5)
+        c.setFillColorRGB(0.5, 0.5, 0.5)
+        c.drawString(MARGIN, y, ref)
+        y -= 7.5 * 1.3
 
-    style = ParagraphStyle(
-        'body',
-        fontName='Helvetica',
-        fontSize=font_size,
-        leading=font_size * 1.3,
-        textColor=DARK,
-    )
-    p = Paragraph(text.replace('\n', '<br/>'), style)
-    w_used, h_used = p.wrap(width, 9999)
-    p.drawOn(c, x, y - h_used)
-    return y - h_used - 2 * mm
+    # Question number + text
+    c.setFillColorRGB(*DARK)
+    c.setFont("Helvetica-Bold", 9)
+    label = f"{q['number']}. "
+    lw = c.stringWidth(label, "Helvetica-Bold", 9)
+    c.drawString(MARGIN, y, label)
 
+    qtext = q.get('question', '')
+    # If question contains a quoted line (separated by \n\n), draw quote first
+    parts = qtext.split('\n\n', 1)
+    if len(parts) == 2:
+        quote, question_body = parts
+        c.setFont("Helvetica-BoldOblique", 9)
+        c.drawString(MARGIN + lw, y, quote)
+        y -= 9 * 1.35
+        c.setFont("Helvetica-Bold", 9)
+        q_lines = wrap_text(c, question_body, "Helvetica-Bold", 9, CW - lw)
+        for i, line in enumerate(q_lines):
+            c.drawString(MARGIN + (lw if i == 0 else 0), y, line)
+            y -= 9 * 1.35
+    else:
+        q_lines = wrap_text(c, qtext, "Helvetica-Bold", 9, CW - lw)
+        for i, line in enumerate(q_lines):
+            c.drawString(MARGIN + (lw if i == 0 else 0), y, line)
+            y -= 9 * 1.35
 
-# ── extract box ───────────────────────────────────────────────────────────────
-
-def draw_extract(c: Canvas, extract: str, y: float) -> float:
-    """Draw extract in a coloured box. Returns y below."""
-    from reportlab.platypus import Paragraph
-    from reportlab.lib.styles import ParagraphStyle
-
-    style = ParagraphStyle(
-        'extract',
-        fontName='Helvetica',
-        fontSize=10,
-        leading=13,
-        textColor=DARK,
-        leftIndent=3 * mm,
-        rightIndent=3 * mm,
-    )
-    p = Paragraph(extract, style)
-    w_used, h_used = p.wrap(CW - 6 * mm, 9999)
-    box_h = h_used + 4 * mm
-    # Draw box
-    c.setFillColor(BOX_BG)
-    c.setStrokeColor(BOX_BORDER)
-    c.setLineWidth(0.75)
-    c.rect(MARGIN, y - box_h, CW, box_h, fill=1, stroke=1)
-    # Draw text
-    p.drawOn(c, MARGIN + 3 * mm, y - box_h + 2 * mm)
-    return y - box_h - 3 * mm
+    y -= 1 * mm
+    return y, lw
 
 
-# ── question rendering ────────────────────────────────────────────────────────
-
-LINE_H  = 7 * mm    # answer line spacing
-LABEL_W = 8 * mm    # width of the Q-number badge
-Q_GAP   = 2 * mm    # gap between questions
-
-def _draw_q_badge(c: Canvas, qnum: int, y: float):
-    """Draw the dark blue rounded number badge. Returns nothing — caller manages y."""
-    c.setFillColor(BOX_BORDER)
-    c.roundRect(MARGIN, y - 5 * mm, LABEL_W, 5.5 * mm, 1.5 * mm, fill=1, stroke=0)
-    c.setFillColor(white)
-    c.setFont('Helvetica-Bold', 9)
-    c.drawCentredString(MARGIN + LABEL_W / 2, y - 4 * mm, str(qnum))
+def draw_scaffold(c, scaffold, y):
+    """Draw the supported scaffold hint in italic below the question."""
+    if not scaffold:
+        return y
+    c.setFont("Helvetica-Oblique", 8)
+    c.setFillColorRGB(0.4, 0.4, 0.6)
+    c.drawString(MARGIN + 3 * mm, y, scaffold)
+    y -= 8 * 1.35
+    return y
 
 
-def _draw_q_text(c: Canvas, question: str, y: float) -> float:
-    """Draw bold question text. Returns y below it."""
-    from reportlab.platypus import Paragraph
-    from reportlab.lib.styles import ParagraphStyle
-    q_w = CW - LABEL_W - 2 * mm
-    style = ParagraphStyle('q', fontName='Helvetica-Bold', fontSize=10,
-                           leading=12.5, textColor=DARK)
-    p = Paragraph(question.replace('&', '&amp;'), style)
-    _, q_h = p.wrap(q_w, 9999)
-    p.drawOn(c, MARGIN + LABEL_W + 2 * mm, y - q_h)
-    return y - max(q_h, 5 * mm) - 1 * mm
+# ===========================================================================
+# Format renderers — pupil versions
+# ===========================================================================
 
-
-def _draw_answer_lines(c: Canvas, y: float, n: int) -> float:
-    c.setStrokeColor(HexColor('#aaaaaa'))
+def render_open_line_pupil(c, q, y, is_supported):
+    lines_n = q['format_data'].get('lines', 2)
+    if is_supported:
+        y = draw_scaffold(c, q.get('supported_scaffold'), y)
+    gap = 6.5 * mm
+    c.setStrokeColorRGB(*GREY_LINE)
     c.setLineWidth(0.4)
-    for _ in range(n):
-        y -= LINE_H
-        c.line(MARGIN + LABEL_W + 2 * mm, y, W - MARGIN, y)
-    return y - Q_GAP
+    for i in range(lines_n):
+        ly = y - (i + 1) * gap
+        c.line(MARGIN, ly, MARGIN + CW, ly)
+    return y - lines_n * gap - 2 * mm
 
 
-def _draw_answer_text(c: Canvas, answer: str, y: float) -> float:
-    from reportlab.platypus import Paragraph
-    from reportlab.lib.styles import ParagraphStyle
-    style = ParagraphStyle('a', fontName='Helvetica', fontSize=9.5,
-                           leading=12, textColor=GREEN,
-                           leftIndent=LABEL_W + 2 * mm)
-    p = Paragraph(answer.replace('&', '&amp;'), style)
-    _, ah = p.wrap(CW - LABEL_W - 2 * mm, 9999)
-    p.drawOn(c, MARGIN, y - ah)
-    return y - ah - Q_GAP
+def render_find_and_copy_pupil(c, q, y, is_supported):
+    # Short blank line for one word/phrase
+    c.setFont("Helvetica", 8)
+    c.setFillColorRGB(*DARK)
+    c.drawString(MARGIN, y - 3 * mm, "_______________________________________________")
+    return y - 8 * mm
 
 
-def _draw_mc_grid(c: Canvas, options: list, answer: str | None, y: float) -> float:
-    """
-    Draw a 2×2 multiple-choice grid matching T5W4 format.
-    No letters — just plain text in bordered cells.
-    If answer is set (answer sheet), correct option is shown in green.
-    """
-    opts = (options + ['', '', '', ''])[:4]   # pad to 4
+def render_numbered_list_pupil(c, q, y, is_supported):
+    n = q['format_data'].get('num_points', 2)
+    if is_supported:
+        y = draw_scaffold(c, q.get('supported_scaffold'), y)
+    gap = 6.5 * mm
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColorRGB(*DARK)
+    for i in range(n):
+        c.drawString(MARGIN, y - (i * (gap * 2)) - 3 * mm, f"{i + 1}.")
+        # Two ruled lines per point
+        c.line(MARGIN + 5 * mm, y - (i * (gap * 2)) - gap, MARGIN + CW, y - (i * (gap * 2)) - gap)
+        c.line(MARGIN + 5 * mm, y - (i * (gap * 2)) - gap * 2, MARGIN + CW, y - (i * (gap * 2)) - gap * 2)
+    return y - n * gap * 2 - 2 * mm
+
+
+def render_tick_one_pupil(c, q, y):
+    fd = q['format_data']
+    options = fd.get('options', [])
+    y = draw_tick_instruction(c, "Tick one.", y)
+    row_h = 6.5 * mm
     col_w = CW / 2
-    row_h = 8 * mm
-    y_top = y
-
-    c.setLineWidth(0.5)
-    c.setFont('Helvetica', 9.5)
-
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
     for row in range(2):
         for col in range(2):
             idx = row * 2 + col
-            opt = opts[idx]
-            x  = MARGIN + col * col_w
-            ry = y_top - row * row_h - row_h
-            # Cell border (grey, no fill)
-            c.setStrokeColor(HexColor('#888888'))
-            c.setFillColor(white)
-            c.rect(x, ry, col_w, row_h, fill=1, stroke=1)
-            # Option text
-            is_correct = answer and opt and opt.strip() == answer.strip()
-            c.setFillColor(GREEN if is_correct else DARK)
-            c.setFont('Helvetica-Bold' if is_correct else 'Helvetica', 9.5)
-            c.drawString(x + 2 * mm, ry + 2.5 * mm, opt)
-
-    return y_top - 2 * row_h - Q_GAP
+            if idx >= len(options):
+                break
+            x = MARGIN + col * col_w
+            ry = y - row * row_h
+            c.setFillColorRGB(1, 1, 1)
+            c.rect(x, ry - row_h, col_w, row_h, fill=1, stroke=1)
+            c.setFillColorRGB(*DARK)
+            c.setFont("Helvetica", 8.5)
+            c.drawString(x + 2 * mm, ry - row_h + 2 * mm, options[idx])
+    return y - 2 * row_h - 2 * mm
 
 
-def _draw_ordering_boxes(c: Canvas, items: list, answer: str | None, y: float) -> float:
-    """
-    Draw ordering question: small square box to the left of each item.
-    On answer sheets, show the correct number in the box in green.
-    """
-    box_sz  = 5 * mm
-    item_h  = 6.5 * mm
-    box_x   = MARGIN + LABEL_W + 2 * mm
+def render_tick_two_pupil(c, q, y):
+    fd = q['format_data']
+    options = fd.get('options', [])
+    y = draw_tick_instruction(c, "Tick two.", y)
+    row_h = 6 * mm
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    for i, opt in enumerate(options):
+        ry = y - i * row_h
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(MARGIN, ry - row_h, CW, row_h, fill=1, stroke=1)
+        draw_checkbox(c, MARGIN + 2 * mm, ry - row_h * 0.2)
+        c.setFillColorRGB(*DARK)
+        c.setFont("Helvetica", 8.5)
+        c.drawString(MARGIN + 8 * mm, ry - row_h + 2 * mm, opt)
+    return y - len(options) * row_h - 2 * mm
 
-    # Parse answer string like "2, 4, 1, 3" into a mapping item_idx → position
-    pos_map = {}
-    if answer:
-        nums = [s.strip() for s in answer.replace(';', ',').split(',') if s.strip().isdigit()]
-        if len(nums) == len(items):
-            pos_map = {i: nums[i] for i in range(len(items))}
 
-    c.setFont('Helvetica', 9.5)
+def render_true_false_table_pupil(c, q, y):
+    fd = q['format_data']
+    statements = fd.get('statements', [])
+    col_stmt = CW * 0.72
+    col_tf = CW * 0.14
+    row_h = 7 * mm
+
+    # Header row
+    c.setFillColorRGB(*BOX_BORDER)
+    c.rect(MARGIN, y - row_h, CW, row_h, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(MARGIN + 2 * mm, y - row_h + 2 * mm, "Statement")
+    c.drawCentredString(MARGIN + col_stmt + col_tf / 2, y - row_h + 2 * mm, "True")
+    c.drawCentredString(MARGIN + col_stmt + col_tf + col_tf / 2, y - row_h + 2 * mm, "False")
+    y -= row_h
+
+    # Statement rows
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    for i, stmt in enumerate(statements):
+        fill = LIGHT_GREY if i % 2 == 0 else (1, 1, 1)
+        c.setFillColorRGB(*fill)
+        c.rect(MARGIN, y - row_h, CW, row_h, fill=1, stroke=1)
+        c.setFillColorRGB(*DARK)
+        c.setFont("Helvetica", 8)
+        c.drawString(MARGIN + 2 * mm, y - row_h + 2 * mm, stmt.get('text', ''))
+        # Dividers between T/F columns
+        c.setLineWidth(0.3)
+        c.line(MARGIN + col_stmt, y, MARGIN + col_stmt, y - row_h)
+        c.line(MARGIN + col_stmt + col_tf, y, MARGIN + col_stmt + col_tf, y - row_h)
+        y -= row_h
+
+    return y - 2 * mm
+
+
+def render_sequencing_pupil(c, q, y):
+    fd = q['format_data']
+    items = deterministic_shuffle(fd.get('items', []))
+    row_h = 6 * mm
+    box_sz = 4.5 * mm
+
+    c.setFont("Helvetica", 8.5)
+    c.setFillColorRGB(*DARK)
     for i, item in enumerate(items):
-        item_y = y - i * item_h - item_h
-        # Box
-        c.setStrokeColor(HexColor('#888888'))
+        ry = y - i * row_h
+        # Small square box for number
+        c.setFillColorRGB(1, 1, 1)
+        c.setStrokeColorRGB(*BOX_BORDER)
         c.setLineWidth(0.5)
-        c.setFillColor(white)
-        c.rect(box_x, item_y, box_sz, box_sz, fill=1, stroke=1)
-        # Answer number inside box (answer sheet only)
-        if pos_map.get(i):
-            c.setFillColor(GREEN)
-            c.setFont('Helvetica-Bold', 9)
-            c.drawCentredString(box_x + box_sz / 2, item_y + 1.2 * mm, pos_map[i])
-        # Item text
-        c.setFillColor(DARK)
-        c.setFont('Helvetica', 9.5)
-        c.drawString(box_x + box_sz + 2 * mm, item_y + 1.2 * mm, item)
-
-    return y - len(items) * item_h - Q_GAP
+        c.rect(MARGIN, ry - box_sz, box_sz, box_sz, fill=1, stroke=1)
+        c.setFillColorRGB(*DARK)
+        c.setFont("Helvetica", 8.5)
+        c.drawString(MARGIN + box_sz + 2 * mm, ry - row_h + 2 * mm, item)
+    return y - len(items) * row_h - 2 * mm
 
 
-def draw_question(c: Canvas, q: dict, y: float, show_answers: bool = False) -> float:
-    """
-    Render one question. Dispatches on q['type']:
-      retrieval, list, vocabulary, explain, compare, inference, fill_blank
-        → question text + answer lines / green answer
-      multiple_choice
-        → question text + 2×2 grid
-      ordering
-        → question text + boxed items
-    Returns y below.
-    """
-    qnum    = q.get('number', 0)
-    qtype   = q.get('type', 'retrieval')
-    qtext   = q.get('question', '')
-    answer  = q.get('answer', '') if show_answers else None
+def render_reason_evidence_pupil(c, q, y):
+    fd = q['format_data']
+    example = fd.get('example', {})
+    blank_rows = fd.get('rows', 2)
+    col_r = CW * 0.42
+    col_e = CW - col_r
+    header_h = 6 * mm
+    row_h = 11 * mm
 
-    _draw_q_badge(c, qnum, y)
-    y = _draw_q_text(c, qtext, y)
+    # Header
+    c.setFillColorRGB(*BOX_BORDER)
+    c.rect(MARGIN, y - header_h, col_r, header_h, fill=1, stroke=0)
+    c.rect(MARGIN + col_r, y - header_h, col_e, header_h, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawCentredString(MARGIN + col_r / 2, y - header_h + 2 * mm, "Reason")
+    c.drawCentredString(MARGIN + col_r + col_e / 2, y - header_h + 2 * mm, "Evidence")
+    y -= header_h
 
-    if qtype == 'multiple_choice':
-        opts = q.get('options', [])
-        ans_label = q.get('answer', '') if show_answers else None
-        y = _draw_mc_grid(c, opts, ans_label, y)
+    # Example row (shaded)
+    c.setFillColorRGB(*LIGHT_GREY)
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    c.rect(MARGIN, y - row_h, col_r, row_h, fill=1, stroke=1)
+    c.rect(MARGIN + col_r, y - row_h, col_e, row_h, fill=1, stroke=1)
+    c.setFillColorRGB(0.35, 0.35, 0.35)
+    c.setFont("Helvetica-Oblique", 8)
+    reason_lines = wrap_text(c, example.get('reason', ''), "Helvetica-Oblique", 8, col_r - 4 * mm)
+    ry = y - 3 * mm
+    for line in reason_lines:
+        c.drawString(MARGIN + 2 * mm, ry, line)
+        ry -= 8 * 1.3
+    ev_lines = wrap_text(c, example.get('evidence', ''), "Helvetica-Oblique", 8, col_e - 4 * mm)
+    ry = y - 3 * mm
+    for line in ev_lines:
+        c.drawString(MARGIN + col_r + 2 * mm, ry, line)
+        ry -= 8 * 1.3
+    y -= row_h
 
-    elif qtype == 'ordering':
-        items = q.get('items', [])
-        ans_label = q.get('answer', '') if show_answers else None
-        y = _draw_ordering_boxes(c, items, ans_label, y)
+    # Blank rows
+    for _ in range(blank_rows):
+        c.setFillColorRGB(1, 1, 1)
+        c.setStrokeColorRGB(*GREY_LINE)
+        c.setLineWidth(0.4)
+        c.rect(MARGIN, y - row_h, col_r, row_h, fill=1, stroke=1)
+        c.rect(MARGIN + col_r, y - row_h, col_e, row_h, fill=1, stroke=1)
+        y -= row_h
 
-    else:
-        # All other types: answer lines or green answer text
-        if show_answers and answer:
-            y = _draw_answer_text(c, answer, y)
+    return y - 2 * mm
+
+
+def render_two_part_ab_pupil(c, q, y, is_supported):
+    fd = q['format_data']
+    parts = fd.get('parts', [])
+    for part in parts:
+        label = part.get('label', '?')
+        pq = part.get('question', '')
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(*DARK)
+        pl = f"({label})  "
+        plw = c.stringWidth(pl, "Helvetica-Bold", 8.5)
+        c.drawString(MARGIN + 3 * mm, y, pl)
+        pq_lines = wrap_text(c, pq, "Helvetica-Bold", 8.5, CW - plw - 3 * mm)
+        for i, line in enumerate(pq_lines):
+            c.drawString(MARGIN + 3 * mm + plw, y - i * (8.5 * 1.35), line)
+        y -= len(pq_lines) * (8.5 * 1.35) + 1 * mm
+        # One answer line per part
+        c.setStrokeColorRGB(*GREY_LINE)
+        c.setLineWidth(0.4)
+        c.line(MARGIN + 3 * mm, y - 6 * mm, MARGIN + CW, y - 6 * mm)
+        c.line(MARGIN + 3 * mm, y - 12 * mm, MARGIN + CW, y - 12 * mm)
+        y -= 13 * mm
+    return y - 2 * mm
+
+
+# ===========================================================================
+# Format renderers — answer versions
+# ===========================================================================
+
+def render_open_line_answer(c, q, y):
+    answer = q.get('answer', '')
+    c.setFillColorRGB(*GREEN)
+    c.setFont("Helvetica-Oblique", 8.5)
+    ans_lines = wrap_text(c, answer, "Helvetica-Oblique", 8.5, CW)
+    for line in ans_lines:
+        c.drawString(MARGIN, y - 5 * mm, line)
+        y -= 5 * mm
+    return y - 3 * mm
+
+
+def render_find_and_copy_answer(c, q, y):
+    target = q['format_data'].get('target_word', q.get('answer', ''))
+    c.setFont("Helvetica-BoldOblique", 9)
+    c.setFillColorRGB(*GREEN)
+    c.drawString(MARGIN, y - 4 * mm, f"\u2714  {target}")
+    return y - 9 * mm
+
+
+def render_numbered_list_answer(c, q, y):
+    answer = q.get('answer', '')
+    n = q['format_data'].get('num_points', 2)
+    # Try to split on "1." / "2." etc.
+    parts = []
+    import re
+    matches = re.split(r'\d+\.\s+', answer)
+    parts = [p.strip() for p in matches if p.strip()]
+    if len(parts) < n:
+        parts = [answer] + [''] * (n - 1)
+    c.setFont("Helvetica-Oblique", 8.5)
+    c.setFillColorRGB(*GREEN)
+    for i in range(n):
+        c.setFont("Helvetica-Bold", 9)
+        c.setFillColorRGB(*DARK)
+        c.drawString(MARGIN, y - 3 * mm, f"{i + 1}.")
+        c.setFont("Helvetica-Oblique", 8.5)
+        c.setFillColorRGB(*GREEN)
+        c.drawString(MARGIN + 5 * mm, y - 3 * mm, parts[i] if i < len(parts) else '')
+        y -= 9 * mm
+    return y - 2 * mm
+
+
+def render_tick_one_answer(c, q, y):
+    fd = q['format_data']
+    options = fd.get('options', [])
+    correct_i = fd.get('correct_index', 0)
+    y = draw_tick_instruction(c, "Tick one.", y)
+    row_h = 6.5 * mm
+    col_w = CW / 2
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    for row in range(2):
+        for col in range(2):
+            idx = row * 2 + col
+            if idx >= len(options):
+                break
+            x = MARGIN + col * col_w
+            ry = y - row * row_h
+            is_correct = (idx == correct_i)
+            if is_correct:
+                c.setFillColorRGB(*TICK_CELL)
+            else:
+                c.setFillColorRGB(1, 1, 1)
+            c.rect(x, ry - row_h, col_w, row_h, fill=1, stroke=1)
+            if is_correct:
+                c.setFillColorRGB(*GREEN)
+                c.setFont("Helvetica-Bold", 8.5)
+                c.drawString(x + 2 * mm, ry - row_h + 2 * mm, options[idx] + "  \u2714")
+            else:
+                c.setFillColorRGB(*DARK)
+                c.setFont("Helvetica", 8.5)
+                c.drawString(x + 2 * mm, ry - row_h + 2 * mm, options[idx])
+    return y - 2 * row_h - 2 * mm
+
+
+def render_tick_two_answer(c, q, y):
+    fd = q['format_data']
+    options = fd.get('options', [])
+    correct_is = set(fd.get('correct_indices', []))
+    y = draw_tick_instruction(c, "Tick two.", y)
+    row_h = 6 * mm
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    for i, opt in enumerate(options):
+        ry = y - i * row_h
+        is_correct = (i in correct_is)
+        fill = TICK_CELL if is_correct else (1, 1, 1)
+        c.setFillColorRGB(*fill)
+        c.rect(MARGIN, ry - row_h, CW, row_h, fill=1, stroke=1)
+        if is_correct:
+            c.setFillColorRGB(*GREEN)
+            c.setFont("Helvetica-Bold", 8.5)
+            c.drawString(MARGIN + 8 * mm, ry - row_h + 2 * mm, opt + "  \u2714")
         else:
-            # Scale lines by question number (harder = more space)
-            lines = 4 if qnum >= 6 else 3 if qnum >= 4 else 2
-            y = _draw_answer_lines(c, y, lines)
+            c.setFillColorRGB(*DARK)
+            c.setFont("Helvetica", 8.5)
+            c.drawString(MARGIN + 8 * mm, ry - row_h + 2 * mm, opt)
+    return y - len(options) * row_h - 2 * mm
 
-    return y
+
+def render_true_false_table_answer(c, q, y):
+    fd = q['format_data']
+    statements = fd.get('statements', [])
+    col_stmt = CW * 0.72
+    col_tf = CW * 0.14
+    row_h = 7 * mm
+
+    # Header
+    c.setFillColorRGB(*BOX_BORDER)
+    c.rect(MARGIN, y - row_h, CW, row_h, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(MARGIN + 2 * mm, y - row_h + 2 * mm, "Statement")
+    c.drawCentredString(MARGIN + col_stmt + col_tf / 2, y - row_h + 2 * mm, "True")
+    c.drawCentredString(MARGIN + col_stmt + col_tf + col_tf / 2, y - row_h + 2 * mm, "False")
+    y -= row_h
+
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    for i, stmt in enumerate(statements):
+        fill = LIGHT_GREY if i % 2 == 0 else (1, 1, 1)
+        c.setFillColorRGB(*fill)
+        c.rect(MARGIN, y - row_h, CW, row_h, fill=1, stroke=1)
+        c.setFillColorRGB(*DARK)
+        c.setFont("Helvetica", 8)
+        c.drawString(MARGIN + 2 * mm, y - row_h + 2 * mm, stmt.get('text', ''))
+        c.line(MARGIN + col_stmt, y, MARGIN + col_stmt, y - row_h)
+        c.line(MARGIN + col_stmt + col_tf, y, MARGIN + col_stmt + col_tf, y - row_h)
+
+        # Tick the correct column
+        is_true = stmt.get('correct', False)
+        tick_x_centre = (MARGIN + col_stmt + col_tf / 2) if is_true else (MARGIN + col_stmt + col_tf + col_tf / 2)
+        c.setFillColorRGB(*GREEN)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(tick_x_centre, y - row_h + 2 * mm, "\u2714")
+        y -= row_h
+
+    return y - 2 * mm
 
 
-# ── page builder ──────────────────────────────────────────────────────────────
+def render_sequencing_answer(c, q, y):
+    fd = q['format_data']
+    correct_order = fd.get('items', [])
+    shuffled = deterministic_shuffle(correct_order)
+    # Build a map: item text → correct position (1-based)
+    position = {item: str(i + 1) for i, item in enumerate(correct_order)}
+    row_h = 6 * mm
+    box_sz = 4.5 * mm
 
-def build_page(
-    lesson: dict,
-    lesson_type: str,
-    version: str,       # 'standard', 'supported', 'answers_std', 'answers_sup'
-    key_question: str,
-    icon_path: str,
-    logo_path: str | None = None,
-) -> bytes:
-    """Build a single A4 page as PDF bytes."""
+    for i, item in enumerate(shuffled):
+        ry = y - i * row_h
+        # Green filled box with correct number
+        c.setFillColorRGB(*TICK_CELL)
+        c.setStrokeColorRGB(*BOX_BORDER)
+        c.setLineWidth(0.5)
+        c.rect(MARGIN, ry - box_sz, box_sz, box_sz, fill=1, stroke=1)
+        c.setFillColorRGB(*GREEN)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawCentredString(MARGIN + box_sz / 2, ry - box_sz + 1 * mm, position[item])
+        c.setFillColorRGB(*DARK)
+        c.setFont("Helvetica", 8.5)
+        c.drawString(MARGIN + box_sz + 2 * mm, ry - row_h + 2 * mm, item)
+    return y - len(shuffled) * row_h - 2 * mm
 
-    buf = io.BytesIO()
-    c = Canvas(buf, pagesize=A4)
 
-    day  = lesson.get('day', '')
-    date = lesson.get('date', '')
-    extract = lesson.get(
-        'extract_supported' if version == 'supported' else 'extract_standard', ''
-    )
-    questions = lesson.get(
-        'questions_supported' if version in ('supported', 'answers_sup')
-        else 'questions_standard',
-        []
-    )
-    show_answers = version in ('answers_std', 'answers_sup')
+def render_reason_evidence_answer(c, q, y):
+    fd = q['format_data']
+    example = fd.get('example', {})
+    blank_rows = fd.get('rows', 2)
+    answer = q.get('answer', '')
+    col_r = CW * 0.42
+    col_e = CW - col_r
+    header_h = 6 * mm
+    row_h = 11 * mm
 
-    y = H - MARGIN
+    # Header
+    c.setFillColorRGB(*BOX_BORDER)
+    c.rect(MARGIN, y - header_h, col_r, header_h, fill=1, stroke=0)
+    c.rect(MARGIN + col_r, y - header_h, col_e, header_h, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawCentredString(MARGIN + col_r / 2, y - header_h + 2 * mm, "Reason")
+    c.drawCentredString(MARGIN + col_r + col_e / 2, y - header_h + 2 * mm, "Evidence")
+    y -= header_h
 
-    # Header (includes LF + I can statements internally)
-    y = draw_header(c, lesson_type, day, date, key_question, icon_path, y,
-                    logo_path=logo_path)
+    # Example row
+    c.setFillColorRGB(*LIGHT_GREY)
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.4)
+    c.rect(MARGIN, y - row_h, col_r, row_h, fill=1, stroke=1)
+    c.rect(MARGIN + col_r, y - row_h, col_e, row_h, fill=1, stroke=1)
+    c.setFillColorRGB(0.35, 0.35, 0.35)
+    c.setFont("Helvetica-Oblique", 8)
+    ry = y - 3 * mm
+    for line in wrap_text(c, example.get('reason', ''), "Helvetica-Oblique", 8, col_r - 4 * mm):
+        c.drawString(MARGIN + 2 * mm, ry, line)
+        ry -= 8 * 1.3
+    ry = y - 3 * mm
+    for line in wrap_text(c, example.get('evidence', ''), "Helvetica-Oblique", 8, col_e - 4 * mm):
+        c.drawString(MARGIN + col_r + 2 * mm, ry, line)
+        ry -= 8 * 1.3
+    y -= row_h
 
-    # Extract box
-    y = draw_extract(c, extract, y)
-    y -= 2 * mm
+    # Answer rows in green
+    import re as _re
+    # Try to split answer into reason/evidence pairs
+    ans_pairs = []
+    raw_parts = _re.split(r'\n', answer.strip())
+    for rp in raw_parts:
+        if '|' in rp:
+            r, e = rp.split('|', 1)
+            ans_pairs.append((r.strip(), e.strip()))
+    while len(ans_pairs) < blank_rows:
+        ans_pairs.append(('', ''))
 
-    # Questions
+    for i in range(blank_rows):
+        c.setFillColorRGB(*TICK_CELL)
+        c.setStrokeColorRGB(*GREY_LINE)
+        c.setLineWidth(0.4)
+        c.rect(MARGIN, y - row_h, col_r, row_h, fill=1, stroke=1)
+        c.rect(MARGIN + col_r, y - row_h, col_e, row_h, fill=1, stroke=1)
+        if i < len(ans_pairs) and ans_pairs[i][0]:
+            c.setFillColorRGB(*GREEN)
+            c.setFont("Helvetica-Oblique", 8)
+            ry = y - 3 * mm
+            for line in wrap_text(c, ans_pairs[i][0], "Helvetica-Oblique", 8, col_r - 4 * mm):
+                c.drawString(MARGIN + 2 * mm, ry, line)
+                ry -= 8 * 1.3
+            ry = y - 3 * mm
+            for line in wrap_text(c, ans_pairs[i][1], "Helvetica-Oblique", 8, col_e - 4 * mm):
+                c.drawString(MARGIN + col_r + 2 * mm, ry, line)
+                ry -= 8 * 1.3
+        y -= row_h
+
+    return y - 2 * mm
+
+
+def render_two_part_ab_answer(c, q, y):
+    fd = q['format_data']
+    parts = fd.get('parts', [])
+    for part in parts:
+        label = part.get('label', '?')
+        pq = part.get('question', '')
+        ans = part.get('answer', '')
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(*DARK)
+        pl = f"({label})  "
+        plw = c.stringWidth(pl, "Helvetica-Bold", 8.5)
+        c.drawString(MARGIN + 3 * mm, y, pl)
+        pq_lines = wrap_text(c, pq, "Helvetica-Bold", 8.5, CW - plw - 3 * mm)
+        for i, line in enumerate(pq_lines):
+            c.drawString(MARGIN + 3 * mm + plw, y - i * (8.5 * 1.35), line)
+        y -= len(pq_lines) * (8.5 * 1.35) + 1 * mm
+        c.setFont("Helvetica-Oblique", 8.5)
+        c.setFillColorRGB(*GREEN)
+        c.drawString(MARGIN + 5 * mm, y - 3 * mm, f"\u2714  {ans}")
+        y -= 9 * mm
+    return y - 2 * mm
+
+
+# ===========================================================================
+# Height estimation (for overflow checking)
+# ===========================================================================
+
+def estimate_height(c, q):
+    """
+    Estimate the height (in points) that a question will occupy.
+    Used to decide whether Q7 (or Q5) fits before drawing.
+    """
+    ref_h = 7.5 * 1.3 if q.get('text_reference', '').strip() else 0
+    qtext = q.get('question', '')
+    # Estimate label width (e.g. "7. ")
+    lw = c.stringWidth(f"{q['number']}. ", "Helvetica-Bold", 9)
+    q_lines = wrap_text(c, qtext.split('\n\n')[-1], "Helvetica-Bold", 9, CW - lw)
+    q_text_h = len(q_lines) * 9 * 1.35 + 1 * mm
+
+    fmt = q.get('format', 'open_line')
+    fd = q.get('format_data', {})
+
+    if fmt == 'open_line':
+        body_h = fd.get('lines', 2) * 6.5 * mm + 2 * mm
+    elif fmt == 'find_and_copy':
+        body_h = 8 * mm
+    elif fmt == 'numbered_list':
+        body_h = fd.get('num_points', 2) * 13 * mm + 2 * mm
+    elif fmt in ('tick_one',):
+        body_h = 4 * mm + 2 * 6.5 * mm + 2 * mm
+    elif fmt == 'tick_two':
+        body_h = 4 * mm + len(fd.get('options', [])) * 6 * mm + 2 * mm
+    elif fmt == 'true_false_table':
+        body_h = (len(fd.get('statements', [])) + 1) * 7 * mm + 2 * mm
+    elif fmt == 'sequencing':
+        body_h = len(fd.get('items', [])) * 6 * mm + 2 * mm
+    elif fmt == 'reason_evidence_table':
+        body_h = 6 * mm + (fd.get('rows', 2) + 1) * 11 * mm + 2 * mm
+    elif fmt == 'two_part_ab':
+        body_h = len(fd.get('parts', [])) * (8.5 * 1.35 + 10 * mm) + 2 * mm
+    else:
+        body_h = 13 * mm
+
+    return ref_h + q_text_h + body_h + 3 * mm
+
+
+# ===========================================================================
+# Single question renderer (dispatches by format)
+# ===========================================================================
+
+def render_question(c, q, y, is_answer, is_supported):
+    """
+    Render one question at position y.
+    Returns new y below question, or None if estimated height exceeds remaining space.
+    """
+    if y - estimate_height(c, q) < MIN_Y:
+        return None
+
+    y, _ = draw_preamble(c, q, y)
+    marks_label(c, q.get('marks', 1), y + 9 * 1.35)  # align to question text top
+
+    fmt = q.get('format', 'open_line')
+
+    if is_answer:
+        dispatch = {
+            'open_line':              lambda: render_open_line_answer(c, q, y),
+            'find_and_copy':          lambda: render_find_and_copy_answer(c, q, y),
+            'numbered_list':          lambda: render_numbered_list_answer(c, q, y),
+            'tick_one':               lambda: render_tick_one_answer(c, q, y),
+            'tick_two':               lambda: render_tick_two_answer(c, q, y),
+            'true_false_table':       lambda: render_true_false_table_answer(c, q, y),
+            'sequencing':             lambda: render_sequencing_answer(c, q, y),
+            'reason_evidence_table':  lambda: render_reason_evidence_answer(c, q, y),
+            'two_part_ab':            lambda: render_two_part_ab_answer(c, q, y),
+        }
+    else:
+        dispatch = {
+            'open_line':              lambda: render_open_line_pupil(c, q, y, is_supported),
+            'find_and_copy':          lambda: render_find_and_copy_pupil(c, q, y, is_supported),
+            'numbered_list':          lambda: render_numbered_list_pupil(c, q, y, is_supported),
+            'tick_one':               lambda: render_tick_one_pupil(c, q, y),
+            'tick_two':               lambda: render_tick_two_pupil(c, q, y),
+            'true_false_table':       lambda: render_true_false_table_pupil(c, q, y),
+            'sequencing':             lambda: render_sequencing_pupil(c, q, y),
+            'reason_evidence_table':  lambda: render_reason_evidence_pupil(c, q, y),
+            'two_part_ab':            lambda: render_two_part_ab_pupil(c, q, y, is_supported),
+        }
+
+    renderer = dispatch.get(fmt)
+    if renderer is None:
+        # Unknown format — fall back to open lines
+        return render_open_line_pupil(c, q, y, is_supported) - 3 * mm
+
+    return renderer() - 3 * mm
+
+
+# ===========================================================================
+# Page builder
+# ===========================================================================
+
+def build_page(path, lesson, text, questions, is_answer, is_supported, icon_path):
+    """Build a single A4 PDF page for one lesson version."""
+    c = rl_canvas.Canvas(path, pagesize=A4)
+
+    lesson_type = lesson['lesson_type'].capitalize()
+    day = lesson['day']
+    date = lesson['date']
+    key_q = lesson.get('key_question', '')
+    i_cans = lesson.get('i_can_statements', [])
+
+    y = draw_header(c, lesson_type, day, date, key_q, i_cans, icon_path)
+    y = draw_text_box(c, text, y, font_size=10 if not is_supported else 9.5)
+
     for q in questions:
-        y = draw_question(c, q, y, show_answers=show_answers)
-        if y < MARGIN + 20 * mm:
+        result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
+        if result is None:
+            # No room — silently drop remaining questions (Q7 / Q5)
             break
+        y = result
 
     c.save()
-    return buf.getvalue()
 
 
-# ── main function ─────────────────────────────────────────────────────────────
+def check_pages(path):
+    return len(PdfReader(path).pages)
 
-def build_pdfs(lesson_data: dict, key_question: str,
-               icon_path: str, output_dir: str,
-               logo_path: str | None = None) -> dict[str, str]:
+
+def merge_pdfs(paths, out_path):
+    writer = PdfWriter()
+    for p in paths:
+        for page in PdfReader(p).pages:
+            writer.add_page(page)
+    with open(out_path, 'wb') as f:
+        writer.write(f)
+
+
+# ===========================================================================
+# Main entry point
+# ===========================================================================
+
+def build_pdfs(content: dict, icon_path: str, output_dir: str) -> dict:
     """
-    Build all PDFs and return a dict mapping name → filepath.
+    Build all 3 PDFs from content_generator output.
+
+    content   : dict returned by content_generator.generate_content()
+    icon_path : path to the reader icon PNG/WebP
+    output_dir: directory to write final PDFs
+
+    Returns dict: {
+        'standard': '/path/to/Standard_Pupil.pdf',
+        'supported': '/path/to/Supported_Pupil.pdf',
+        'answers': '/path/to/All_Answers.pdf',
+    }
     """
-    lessons = lesson_data['lessons']
-    week_ref = lesson_data.get('week', 'TxWx')
-    lesson_types = ['Vocabulary', 'Retrieval', 'Inference']
+    import tempfile, shutil
 
-    pages = {}
-    for i, lesson in enumerate(lessons):
-        ltype = lesson.get('type', lesson_types[i])
-        for ver in ('standard', 'supported', 'answers_std', 'answers_sup'):
-            pages[(i, ver)] = build_page(lesson, ltype, ver, key_question,
-                                         icon_path, logo_path=logo_path)
+    tmp = tempfile.mkdtemp()
+    key_q = content.get('key_question', '')
 
-    def merge(page_keys: list) -> bytes:
-        writer = PdfWriter()
-        for key in page_keys:
-            reader = PdfReader(io.BytesIO(pages[key]))
-            writer.add_page(reader.pages[0])
-        buf = io.BytesIO()
-        writer.write(buf)
-        return buf.getvalue()
+    # Inject key_question into each lesson for header use
+    for lesson in content['lessons']:
+        lesson['key_question'] = key_q
+
+    std_pages, sup_pages, ans_pages = [], [], []
+
+    for lesson in content['lessons']:
+        lt = lesson['lesson_type']
+        std_qs = lesson['questions']          # all 7
+        sup_qs = lesson['questions'][:5]      # first 5 only
+        text = lesson.get('text', '')         # app passes text per lesson
+        std_text = text
+        sup_text = text                       # same text; supported version is shorter questions
+
+        # Standard pupil
+        p = os.path.join(tmp, f"{lt}_std.pdf")
+        build_page(p, lesson, std_text, std_qs, is_answer=False, is_supported=False, icon_path=icon_path)
+        if check_pages(p) > 1:
+            build_page(p, lesson, std_text, std_qs[:-1], is_answer=False, is_supported=False, icon_path=icon_path)
+        std_pages.append(p)
+
+        # Supported pupil
+        p = os.path.join(tmp, f"{lt}_sup.pdf")
+        build_page(p, lesson, sup_text, sup_qs, is_answer=False, is_supported=True, icon_path=icon_path)
+        if check_pages(p) > 1:
+            build_page(p, lesson, sup_text, sup_qs[:-1], is_answer=False, is_supported=True, icon_path=icon_path)
+        sup_pages.append(p)
+
+        # Standard answers
+        p = os.path.join(tmp, f"{lt}_std_ans.pdf")
+        build_page(p, lesson, std_text, std_qs, is_answer=True, is_supported=False, icon_path=icon_path)
+        std_ans = p
+
+        # Supported answers
+        p = os.path.join(tmp, f"{lt}_sup_ans.pdf")
+        build_page(p, lesson, sup_text, sup_qs, is_answer=True, is_supported=True, icon_path=icon_path)
+        sup_ans = p
+
+        ans_pages.extend([std_ans, sup_ans])
 
     os.makedirs(output_dir, exist_ok=True)
+    out_std = os.path.join(output_dir, 'Standard_Pupil.pdf')
+    out_sup = os.path.join(output_dir, 'Supported_Pupil.pdf')
+    out_ans = os.path.join(output_dir, 'All_Answers.pdf')
 
-    paths = {}
+    merge_pdfs(std_pages, out_std)
+    merge_pdfs(sup_pages, out_sup)
+    merge_pdfs(ans_pages, out_ans)
 
-    # Standard pupil: L1_std, L2_std, L3_std
-    data = merge([(i, 'standard') for i in range(3)])
-    p = os.path.join(output_dir, f'Standard_Pupil_{week_ref}.pdf')
-    with open(p, 'wb') as f: f.write(data)
-    paths['standard_pupil'] = p
+    shutil.rmtree(tmp)
 
-    # Supported pupil
-    data = merge([(i, 'supported') for i in range(3)])
-    p = os.path.join(output_dir, f'Supported_Pupil_{week_ref}.pdf')
-    with open(p, 'wb') as f: f.write(data)
-    paths['supported_pupil'] = p
-
-    # All answers: std_ans, sup_ans for each lesson interleaved
-    ans_keys = []
-    for i in range(3):
-        ans_keys += [(i, 'answers_std'), (i, 'answers_sup')]
-    data = merge(ans_keys)
-    p = os.path.join(output_dir, f'All_Answers_{week_ref}.pdf')
-    with open(p, 'wb') as f: f.write(data)
-    paths['all_answers'] = p
-
-    return paths
+    return {
+        'standard': out_std,
+        'supported': out_sup,
+        'answers': out_ans,
+    }
