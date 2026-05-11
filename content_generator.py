@@ -239,6 +239,23 @@ For each question, also provide a "supported_scaffold" string. This is additiona
   find_and_copy: null
 
 ---
+READING TEXT
+
+You must write the reading extract. Do not ask for it — generate it yourself based on the topic and context provided.
+
+Requirements:
+- 200–250 words, a single continuous paragraph (no subheadings, no bullet points)
+- Written in plain, clear prose suitable for Y4 readers (age 8–9)
+- Informative and accurate to the topic — treat it as a high-quality teacher-written extract
+- NOT a real copyrighted text — write it fresh, even if the topic is well-known
+- The text must contain enough detail to support 7 varied questions per lesson
+- Embed at least 4 Tier 2 vocabulary words naturally (words that will appear in vocabulary questions)
+- For fiction topics: write as literary prose with character, setting and narrative tension
+- For non-fiction topics: write as a clear, engaging information text
+
+The text goes in the top-level "standard_text" field. All three lessons use the same text.
+
+---
 OUTPUT FORMAT
 
 Respond with ONLY valid JSON. No preamble, no explanation, no markdown fences.
@@ -247,6 +264,7 @@ The JSON must match this exact structure:
 
 {
   "key_question": "...",
+  "standard_text": "The full 200-250 word reading extract goes here...",
   "lessons": [
     {
       "lesson_type": "vocabulary",
@@ -283,7 +301,7 @@ The JSON must match this exact structure:
 
 
 def build_user_prompt(
-    text: str,
+    topic: str,
     key_question: str,
     vocab_day: str,
     vocab_date: str,
@@ -294,9 +312,10 @@ def build_user_prompt(
     inference_day: str,
     inference_date: str,
     inference_i_can: list[str],
+    context: str = "",
 ) -> str:
-    return f"""TEXT:
-{text}
+    context_line = f"\nCURRICULUM CONTEXT: {context}" if context.strip() else ""
+    return f"""TOPIC: {topic}{context_line}
 
 KEY QUESTION: {key_question}
 
@@ -334,7 +353,7 @@ Generate all three lessons now. Remember: ONLY valid JSON, no markdown fences.""
 
 
 def generate_content(
-    text: str,
+    topic: str,
     key_question: str,
     vocab_day: str,
     vocab_date: str,
@@ -345,13 +364,16 @@ def generate_content(
     inference_day: str,
     inference_date: str,
     inference_i_can: list[str],
+    context: str = "",
 ) -> dict:
     """
     Call the Claude API and return parsed lesson content as a dict.
+    Returns a dict that includes 'standard_text' (the generated reading extract)
+    alongside the three lessons with questions.
     Raises ValueError if the response cannot be parsed as valid JSON.
     """
     user_prompt = build_user_prompt(
-        text=text,
+        topic=topic,
         key_question=key_question,
         vocab_day=vocab_day,
         vocab_date=vocab_date,
@@ -362,6 +384,7 @@ def generate_content(
         inference_day=inference_day,
         inference_date=inference_date,
         inference_i_can=inference_i_can,
+        context=context,
     )
 
     response = client.messages.create(
@@ -423,6 +446,8 @@ LESSON_TYPE_SEQUENCES = {
 
 def _validate(data: dict) -> None:
     """Light validation — raises ValueError on structural problems."""
+    if not data.get("standard_text", "").strip():
+        raise ValueError("Missing or empty 'standard_text' in response — Claude did not generate the reading extract")
     if "lessons" not in data:
         raise ValueError("Missing 'lessons' key in response")
     if len(data["lessons"]) != 3:

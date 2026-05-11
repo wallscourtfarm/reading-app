@@ -73,12 +73,18 @@ def _next_tuesday() -> date:
 col_text, col_meta = st.columns([3, 2], gap="large")
 
 with col_text:
-    st.subheader("Reading text")
-    text = st.text_area(
-        "Paste the reading extract here",
-        height=280,
-        help="This text is used for all three lessons. "
-             "Aim for 200–250 words for the standard version.",
+    st.subheader("Topic or text")
+    topic = st.text_input(
+        "Topic or text",
+        placeholder="e.g. Anglo-Saxons, Sound waves, Charlotte's Web chapter 3",
+        label_visibility="collapsed",
+    )
+    context = st.text_area(
+        "Curriculum context (optional)",
+        placeholder="e.g. Y4 history unit on Anglo-Saxons and Vikings. "
+                    "Children have studied settlements and trade.",
+        height=100,
+        help="Give Claude context about your current unit so the extract fits your teaching.",
         label_visibility="collapsed",
     )
 
@@ -147,10 +153,10 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Generate
 # ---------------------------------------------------------------------------
-ready = bool(text.strip()) and bool(key_question.strip())
+ready = bool(topic.strip()) and bool(key_question.strip())
 
 if not ready:
-    st.info("Paste the reading text and enter a key question to get started.")
+    st.info("Enter a topic and key question to get started.")
 
 generate = st.button(
     "Generate resources",
@@ -163,8 +169,9 @@ if generate:
     with st.spinner("Generating questions… (this takes about 30 seconds)"):
         try:
             content = generate_content(
-                text=text,
+                topic=topic,
                 key_question=key_question,
+                context=context,
                 vocab_day=voc_date.strftime("%A"),
                 vocab_date=voc_date.strftime("%-d %B %Y"),
                 vocab_i_can=[voc_ican1, voc_ican2],
@@ -182,9 +189,10 @@ if generate:
             st.error(f"Unexpected error during generation: {e}")
             st.stop()
 
-    # Inject the reading text into every lesson so pdf_builder can access it
+    # Inject the generated reading text into every lesson so pdf_builder can access it
+    generated_text = content.get("standard_text", "")
     for lesson in content["lessons"]:
-        lesson["text"] = text
+        lesson["text"] = generated_text
 
     tmp = tempfile.mkdtemp()
 
