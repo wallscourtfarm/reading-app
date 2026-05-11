@@ -244,7 +244,7 @@ READING TEXT
 You must write the reading extract. Do not ask for it — generate it yourself based on the topic and context provided.
 
 Requirements:
-- 200–250 words, a single continuous paragraph (no subheadings, no bullet points)
+- Length: determined by the TEXT_LENGTH parameter in the user message (see below)
 - Written in plain, clear prose suitable for Y4 readers (age 8–9)
 - Informative and accurate to the topic — treat it as a high-quality teacher-written extract
 - NOT a real copyrighted text — write it fresh, even if the topic is well-known
@@ -313,9 +313,28 @@ def build_user_prompt(
     inference_date: str,
     inference_i_can: list[str],
     context: str = "",
+    allowed_formats: list = None,
+    text_length: str = "standard",
 ) -> str:
     context_line = f"\nCURRICULUM CONTEXT: {context}" if context.strip() else ""
+
+    word_counts = {"standard": "200–250", "extended": "400–500"}
+    word_count = word_counts.get(text_length, "200–250")
+
+    if allowed_formats:
+        fmt_restriction = (
+            "\n\nFORMAT RESTRICTION — IMPORTANT: You must ONLY use these question formats "
+            "for every question across all three lessons. Do not use any other format "
+            "even if you think it would be more appropriate:\n  "
+            + ", ".join(allowed_formats)
+            + "\nDistribute the allowed formats as evenly as possible across the 7 questions "
+            "in each lesson. If only one format is selected, all 7 questions must use it."
+        )
+    else:
+        fmt_restriction = ""
+
     return f"""TOPIC: {topic}{context_line}
+TEXT_LENGTH: {word_count} words{fmt_restriction}
 
 KEY QUESTION: {key_question}
 
@@ -365,11 +384,17 @@ def generate_content(
     inference_date: str,
     inference_i_can: list[str],
     context: str = "",
+    allowed_formats: list = None,
+    text_length: str = "standard",
 ) -> dict:
     """
     Call the Claude API and return parsed lesson content as a dict.
     Returns a dict that includes 'standard_text' (the generated reading extract)
     alongside the three lessons with questions.
+
+    allowed_formats : list of format strings to restrict question types, or None for all
+    text_length     : "standard" (200-250 words) or "extended" (400-500 words)
+
     Raises ValueError if the response cannot be parsed as valid JSON.
     """
     user_prompt = build_user_prompt(
@@ -385,6 +410,8 @@ def generate_content(
         inference_date=inference_date,
         inference_i_can=inference_i_can,
         context=context,
+        allowed_formats=allowed_formats,
+        text_length=text_length,
     )
 
     response = client.messages.create(

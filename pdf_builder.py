@@ -875,64 +875,134 @@ def merge_pdfs(paths, out_path):
 # Main entry point
 # ===========================================================================
 
-def build_pdfs(content: dict, icon_path: str, output_dir: str) -> dict:
+# ===========================================================================
+# Text booklet page (SATs layout)
+# ===========================================================================
+
+def build_text_booklet_page(path, lesson, icon_path):
     """
-    Build all 3 PDFs from content_generator output.
+    Build a text-only page for SATs-style output.
+    Full-width reading extract at large font, no questions.
+    """
+    c = rl_canvas.Canvas(path, pagesize=A4)
 
-    content   : dict returned by content_generator.generate_content()
-    icon_path : path to the reader icon PNG/WebP
-    output_dir: directory to write final PDFs
+    lesson_type = lesson["lesson_type"].capitalize()
+    day = lesson["day"]
+    date_str = lesson["date"]
+    key_q = lesson.get("key_question", "")
+    i_cans = lesson.get("i_can_statements", [])
 
-    Returns dict: {
-        'standard': '/path/to/Standard_Pupil.pdf',
-        'supported': '/path/to/Supported_Pupil.pdf',
-        'answers': '/path/to/All_Answers.pdf',
-    }
+    y = draw_header(c, lesson_type, day, date_str, key_q, i_cans, icon_path)
+
+    text = lesson.get("text", "")
+    if text:
+        # Larger font for text booklet — easier reading
+        lines = wrap_text(c, text, "Helvetica", 11, CW - 6 * mm)
+        lh = 11 * 1.5
+        box_h = len(lines) * lh + 8 * mm
+
+        c.setFillColorRGB(*BOX_BG)
+        c.setStrokeColorRGB(*BOX_BORDER)
+        c.setLineWidth(0.8)
+        c.roundRect(MARGIN, y - box_h, CW, box_h, 2 * mm, fill=1, stroke=1)
+
+        c.setFillColorRGB(*DARK)
+        c.setFont("Helvetica", 11)
+        ty = y - 4 * mm - 11 * 0.72
+        for line in lines:
+            c.drawString(MARGIN + 3 * mm, ty, line)
+            ty -= lh
+
+    c.save()
+
+
+def build_pdfs(content: dict, icon_path: str, output_dir: str,
+               layout: str = "integrated") -> dict:
+    """
+    Build PDFs from content_generator output.
+
+    content    : dict returned by content_generator.generate_content()
+    icon_path  : path to the reader icon PNG/WebP
+    output_dir : directory to write final PDFs
+    layout     : "integrated" (text + questions on same page, default)
+                 "sats" (separate text booklet PDF, questions-only PDFs)
+
+    Returns dict with keys:
+      standard, supported, answers          — always present
+      text_booklet                          — only when layout="sats"
     """
     import tempfile, shutil
 
     tmp = tempfile.mkdtemp()
     key_q = content.get('key_question', '')
 
-    # Inject key_question into each lesson for header use
     for lesson in content['lessons']:
         lesson['key_question'] = key_q
 
-    std_pages, sup_pages, ans_pages = [], [], []
+    std_pages, sup_pages, ans_pages, txt_pages = [], [], [], []
 
     for lesson in content['lessons']:
         lt = lesson['lesson_type']
-        std_qs = lesson['questions']          # all 7
-        sup_qs = lesson['questions'][:5]      # first 5 only
-        text = lesson.get('text', '')         # app passes text per lesson
-        std_text = text
-        sup_text = text                       # same text; supported version is shorter questions
+        std_qs = lesson['questions']
+        sup_qs = lesson['questions'][:5]
+        text = lesson.get('text', '')
 
-        # Standard pupil
-        p = os.path.join(tmp, f"{lt}_std.pdf")
-        build_page(p, lesson, std_text, std_qs, is_answer=False, is_supported=False, icon_path=icon_path)
-        if check_pages(p) > 1:
-            build_page(p, lesson, std_text, std_qs[:-1], is_answer=False, is_supported=False, icon_path=icon_path)
-        std_pages.append(p)
+        if layout == 'sats':
+            # Text booklet page — text only, no questions
+            tp = os.path.join(tmp, f"{lt}_text.pdf")
+            build_text_booklet_page(tp, lesson, icon_path)
+            txt_pages.append(tp)
 
-        # Supported pupil
-        p = os.path.join(tmp, f"{lt}_sup.pdf")
-        build_page(p, lesson, sup_text, sup_qs, is_answer=False, is_supported=True, icon_path=icon_path)
-        if check_pages(p) > 1:
-            build_page(p, lesson, sup_text, sup_qs[:-1], is_answer=False, is_supported=True, icon_path=icon_path)
-        sup_pages.append(p)
+            # Question pages — no text box
+            p = os.path.join(tmp, f"{lt}_std.pdf")
+            build_page(p, lesson, '', std_qs, is_answer=False,
+                       is_supported=False, icon_path=icon_path)
+            if check_pages(p) > 1:
+                build_page(p, lesson, '', std_qs[:-1], is_answer=False,
+                           is_supported=False, icon_path=icon_path)
+            std_pages.append(p)
 
-        # Standard answers
-        p = os.path.join(tmp, f"{lt}_std_ans.pdf")
-        build_page(p, lesson, std_text, std_qs, is_answer=True, is_supported=False, icon_path=icon_path)
-        std_ans = p
+            p = os.path.join(tmp, f"{lt}_sup.pdf")
+            build_page(p, lesson, '', sup_qs, is_answer=False,
+                       is_supported=True, icon_path=icon_path)
+            if check_pages(p) > 1:
+                build_page(p, lesson, '', sup_qs[:-1], is_answer=False,
+                           is_supported=True, icon_path=icon_path)
+            sup_pages.append(p)
 
-        # Supported answers
-        p = os.path.join(tmp, f"{lt}_sup_ans.pdf")
-        build_page(p, lesson, sup_text, sup_qs, is_answer=True, is_supported=True, icon_path=icon_path)
-        sup_ans = p
+            p = os.path.join(tmp, f"{lt}_std_ans.pdf")
+            build_page(p, lesson, '', std_qs, is_answer=True,
+                       is_supported=False, icon_path=icon_path)
+            p2 = os.path.join(tmp, f"{lt}_sup_ans.pdf")
+            build_page(p2, lesson, '', sup_qs, is_answer=True,
+                       is_supported=True, icon_path=icon_path)
+            ans_pages.extend([p, p2])
 
-        ans_pages.extend([std_ans, sup_ans])
+        else:
+            # Integrated layout — existing behaviour
+            p = os.path.join(tmp, f"{lt}_std.pdf")
+            build_page(p, lesson, text, std_qs, is_answer=False,
+                       is_supported=False, icon_path=icon_path)
+            if check_pages(p) > 1:
+                build_page(p, lesson, text, std_qs[:-1], is_answer=False,
+                           is_supported=False, icon_path=icon_path)
+            std_pages.append(p)
+
+            p = os.path.join(tmp, f"{lt}_sup.pdf")
+            build_page(p, lesson, text, sup_qs, is_answer=False,
+                       is_supported=True, icon_path=icon_path)
+            if check_pages(p) > 1:
+                build_page(p, lesson, text, sup_qs[:-1], is_answer=False,
+                           is_supported=True, icon_path=icon_path)
+            sup_pages.append(p)
+
+            p = os.path.join(tmp, f"{lt}_std_ans.pdf")
+            build_page(p, lesson, text, std_qs, is_answer=True,
+                       is_supported=False, icon_path=icon_path)
+            p2 = os.path.join(tmp, f"{lt}_sup_ans.pdf")
+            build_page(p2, lesson, text, sup_qs, is_answer=True,
+                       is_supported=True, icon_path=icon_path)
+            ans_pages.extend([p, p2])
 
     os.makedirs(output_dir, exist_ok=True)
     out_std = os.path.join(output_dir, 'Standard_Pupil.pdf')
@@ -943,10 +1013,16 @@ def build_pdfs(content: dict, icon_path: str, output_dir: str) -> dict:
     merge_pdfs(sup_pages, out_sup)
     merge_pdfs(ans_pages, out_ans)
 
-    shutil.rmtree(tmp)
-
-    return {
+    result = {
         'standard': out_std,
         'supported': out_sup,
         'answers': out_ans,
     }
+
+    if layout == 'sats' and txt_pages:
+        out_txt = os.path.join(output_dir, 'Text_Booklet.pdf')
+        merge_pdfs(txt_pages, out_txt)
+        result['text_booklet'] = out_txt
+
+    shutil.rmtree(tmp)
+    return result
