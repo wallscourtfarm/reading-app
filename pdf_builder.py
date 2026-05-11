@@ -1026,3 +1026,304 @@ def build_pdfs(content: dict, icon_path: str, output_dir: str,
 
     shutil.rmtree(tmp)
     return result
+
+
+# ===========================================================================
+# Structured text rendering (supports **heading** markers for non-fiction)
+# ===========================================================================
+
+def _parse_structured_text(text):
+    """
+    Parse text into list of (is_heading, content) tuples.
+    Headings are lines wrapped in **...**. Paragraphs separated by blank lines.
+    """
+    segments = []
+    for block in text.split('\n\n'):
+        block = block.strip()
+        if not block:
+            continue
+        if block.startswith('**') and block.endswith('**') and block.count('**') == 2:
+            segments.append((True, block[2:-2].strip()))
+        else:
+            clean = block.replace('**', '')
+            segments.append((False, clean))
+    return segments or [(False, text)]
+
+
+def draw_structured_text_box(c, text, y_top, font_size=10):
+    """
+    Draw reading text box with optional bold subheadings.
+    Handles **heading** markers. Returns y below box.
+    """
+    segments = _parse_structured_text(text)
+
+    # Calculate total height
+    lh_body = font_size * 1.42
+    lh_head = font_size * 1.35
+    gap = 2.5 * mm
+    total_h = 5 * mm  # top + bottom padding
+    for is_heading, content in segments:
+        font = "Helvetica-Bold" if is_heading else "Helvetica"
+        lh = lh_head if is_heading else lh_body
+        lines = wrap_text(c, content, font, font_size, CW - 6 * mm)
+        total_h += len(lines) * lh + gap
+
+    # Box
+    c.setFillColorRGB(*BOX_BG)
+    c.setStrokeColorRGB(*BOX_BORDER)
+    c.setLineWidth(0.8)
+    c.roundRect(MARGIN, y_top - total_h, CW, total_h, 2 * mm, fill=1, stroke=1)
+
+    # Text
+    ty = y_top - 3.5 * mm
+    c.setFillColorRGB(*DARK)
+    for is_heading, content in segments:
+        font = "Helvetica-Bold" if is_heading else "Helvetica"
+        lh = lh_head if is_heading else lh_body
+        c.setFont(font, font_size)
+        lines = wrap_text(c, content, font, font_size, CW - 6 * mm)
+        for line in lines:
+            ty -= lh
+            c.drawString(MARGIN + 3 * mm, ty, line)
+        ty -= gap
+
+    return y_top - total_h - 3 * mm
+
+
+# ===========================================================================
+# Multi-page question rendering
+# ===========================================================================
+
+def _start_question_page(tmp_dir, prefix, page_num, header_kwargs, include_label):
+    """Create a new canvas for a question page. Returns (canvas, y, path)."""
+    path = os.path.join(tmp_dir, f"{prefix}_p{page_num}.pdf")
+    c = rl_canvas.Canvas(path, pagesize=A4)
+    if include_label and page_num == 1:
+        y = draw_header(c, **header_kwargs)
+    else:
+        y = H - MARGIN - 4 * mm
+        if page_num > 1:
+            c.setFont("Helvetica-Oblique", 7.5)
+            c.setFillColorRGB(0.5, 0.5, 0.5)
+            c.drawRightString(MARGIN + CW, y + 1 * mm, "continued…")
+            y -= 5 * mm
+    return c, y, path
+
+
+def build_question_pages(
+    tmp_dir, prefix, questions,
+    is_answer, is_supported,
+    icon_path, header_kwargs, include_label,
+):
+    """
+    Render questions across one or more pages. Returns list of page paths.
+    header_kwargs: dict of keyword args for draw_header (lesson_type, day, date, key_q,
+                   i_can_statements, icon_path). Ignored when include_label=False.
+    """
+    pages = []
+    page_num = 1
+    c, y, path = _start_question_page(
+        tmp_dir, prefix, page_num, header_kwargs, include_label
+    )
+
+    for q in questions:
+        result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
+        if result is None:
+            # Doesn't fit — save page, start new
+            c.save()
+            pages.append(path)
+            page_num += 1
+            c, y, path = _start_question_page(
+                tmp_dir, prefix, page_num, header_kwargs, include_label=False
+            )
+            result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
+            if result is None:
+                result = y - 25 * mm  # force past it if question is pathologically tall
+        y = result
+
+    c.save()
+    pages.append(path)
+    return pages
+
+
+# ===========================================================================
+# Reading Paper PDF builder
+# ===========================================================================
+
+def _build_reading_paper_text_pages(tmp_dir, text, key_question, font_size=11):
+    """
+    Build text-only page(s) for a reading paper. No learning label.
+    Returns list of page paths.
+    """
+    pages = []
+    path = os.path.join(tmp_dir, "rp_text_p1.pdf")
+    c = rl_canvas.Canvas(path, pagesize=A4)
+    y = H - MARGIN - 2 * mm
+
+    # Key question as title
+    c.setFont("Helvetica-Bold", 12)
+    c.setFillColorRGB(*BOX_BORDER)
+    title_lines = wrap_text(c, key_question, "Helvetica-Bold", 12, CW)
+    for line in title_lines:
+        c.drawString(MARGIN, y, line)
+        y -= 12 * 1.4
+    y -= 3 * mm
+
+    # Thin rule below title
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.5)
+    c.line(MARGIN, y, MARGIN + CW, y)
+    y -= 5 * mm
+
+    # Text — structured box, potentially long
+    # If text would overflow, start a new page (simplified: draw and check)
+    y = draw_structured_text_box(c, text, y, font_size=font_size)
+
+    c.save()
+    pages.append(path)
+    return pages
+
+
+def build_reading_paper_pdfs(
+    content: dict,
+    icon_path: str,
+    output_dir: str,
+    include_label: bool = False,
+    custom_label: str = "",
+) -> dict:
+    """
+    Build PDFs for Reading Paper Mode.
+    content must have 'standard_text' and 'questions'.
+    Returns dict: { 'text': path, 'questions': path, 'mark_scheme': path }
+    """
+    import tempfile, shutil
+
+    tmp = tempfile.mkdtemp()
+    key_q = content.get("key_question", "")
+    text = content.get("standard_text", "")
+    questions = content.get("questions", [])
+
+    # ── Text page(s) ──────────────────────────────────────────────────────
+    txt_pages = _build_reading_paper_text_pages(tmp, text, key_q)
+
+    # ── Learning label header for questions page ───────────────────────────
+    # For reading paper mode the label is the custom_label (user-set)
+    # We build a minimal header: just the label text and key question
+    if include_label and custom_label.strip():
+        def _draw_rp_label(c):
+            y = H - MARGIN
+            c.setFont("Helvetica-Bold", 8)
+            c.setFillColorRGB(*DARK)
+            c.drawString(MARGIN, y - 5 * mm, custom_label.strip())
+            y -= 7 * mm
+            c.setFont("Helvetica-Bold", 10)
+            c.setFillColorRGB(*BOX_BORDER)
+            c.drawString(MARGIN, y - 4 * mm, key_q)
+            kq_w = c.stringWidth(key_q, "Helvetica-Bold", 10)
+            c.setLineWidth(0.5)
+            c.setStrokeColorRGB(*BOX_BORDER)
+            c.line(MARGIN, y - 5 * mm, MARGIN + kq_w, y - 5 * mm)
+            y -= 8 * mm
+            c.setStrokeColorRGB(*GREY_LINE)
+            c.setLineWidth(0.5)
+            c.line(MARGIN, y, MARGIN + CW, y)
+            y -= 3 * mm
+            return y
+    else:
+        _draw_rp_label = None
+
+    # ── Question pages ─────────────────────────────────────────────────────
+    q_pages = []
+    page_num = 0
+
+    def new_q_page(is_first):
+        nonlocal page_num
+        page_num += 1
+        p = os.path.join(tmp, f"rp_q_p{page_num}.pdf")
+        c = rl_canvas.Canvas(p, pagesize=A4)
+        if is_first and _draw_rp_label:
+            y = _draw_rp_label(c)
+        else:
+            y = H - MARGIN - 4 * mm
+            if not is_first:
+                c.setFont("Helvetica-Oblique", 7.5)
+                c.setFillColorRGB(0.5, 0.5, 0.5)
+                c.drawRightString(MARGIN + CW, y + 1 * mm, "continued…")
+                y -= 5 * mm
+        return c, y, p
+
+    c, y, path = new_q_page(is_first=True)
+
+    for q in questions:
+        result = render_question(c, q, y, is_answer=False, is_supported=False)
+        if result is None:
+            c.save()
+            q_pages.append(path)
+            c, y, path = new_q_page(is_first=False)
+            result = render_question(c, q, y, is_answer=False, is_supported=False)
+            if result is None:
+                result = y - 25 * mm
+        y = result
+
+    c.save()
+    q_pages.append(path)
+
+    # ── Mark scheme pages ──────────────────────────────────────────────────
+    ms_pages = []
+    page_num_ms = 0
+
+    def new_ms_page(is_first):
+        nonlocal page_num_ms
+        page_num_ms += 1
+        p = os.path.join(tmp, f"rp_ms_p{page_num_ms}.pdf")
+        c = rl_canvas.Canvas(p, pagesize=A4)
+        y = H - MARGIN - 2 * mm
+        if is_first:
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColorRGB(*BOX_BORDER)
+            c.drawString(MARGIN, y, "Mark Scheme")
+            y -= 11 * 1.4 + 3 * mm
+            c.setStrokeColorRGB(*GREY_LINE)
+            c.setLineWidth(0.5)
+            c.line(MARGIN, y, MARGIN + CW, y)
+            y -= 4 * mm
+        else:
+            c.setFont("Helvetica-Oblique", 7.5)
+            c.setFillColorRGB(0.5, 0.5, 0.5)
+            c.drawRightString(MARGIN + CW, y + 1 * mm, "Mark Scheme continued…")
+            y -= 5 * mm
+        return c, y, p
+
+    c, y, path = new_ms_page(is_first=True)
+
+    for q in questions:
+        result = render_question(c, q, y, is_answer=True, is_supported=False)
+        if result is None:
+            c.save()
+            ms_pages.append(path)
+            c, y, path = new_ms_page(is_first=False)
+            result = render_question(c, q, y, is_answer=True, is_supported=False)
+            if result is None:
+                result = y - 25 * mm
+        y = result
+
+    c.save()
+    ms_pages.append(path)
+
+    # ── Merge and write outputs ────────────────────────────────────────────
+    os.makedirs(output_dir, exist_ok=True)
+    out_text = os.path.join(output_dir, "ReadingPaper_Text.pdf")
+    out_q    = os.path.join(output_dir, "ReadingPaper_Questions.pdf")
+    out_ms   = os.path.join(output_dir, "ReadingPaper_MarkScheme.pdf")
+
+    merge_pdfs(txt_pages, out_text)
+    merge_pdfs(q_pages,   out_q)
+    merge_pdfs(ms_pages,  out_ms)
+
+    shutil.rmtree(tmp)
+
+    return {
+        "text":        out_text,
+        "questions":   out_q,
+        "mark_scheme": out_ms,
+    }

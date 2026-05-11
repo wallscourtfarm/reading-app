@@ -1,6 +1,10 @@
 """
 app.py — Being a Reader resource generator
 Wallscourt Farm Academy
+
+Two modes:
+  Lesson Mode        — 3 lessons (Vocabulary / Retrieval / Inference), full resource set
+  Reading Paper Mode — standalone text + question paper + mark scheme
 """
 
 import base64
@@ -12,8 +16,13 @@ from pathlib import Path
 
 import streamlit as st
 
-from content_generator import generate_content
-from pdf_builder import build_pdfs
+from content_generator import (
+    generate_content,
+    generate_reading_paper,
+    QUESTION_TYPES,
+    QUESTION_LAYOUTS,
+)
+from pdf_builder import build_pdfs, build_reading_paper_pdfs
 from excel_builder import build_excel
 
 try:
@@ -23,7 +32,7 @@ except Exception:
     PPTX_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Config
+# Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="Being a Reader — WFA",
@@ -50,26 +59,13 @@ I_CAN = {
     ],
 }
 
-# Human-readable labels → internal format keys
-QUESTION_TYPE_OPTIONS = {
-    "Open written answer":          "open_line",
-    "Find and copy":                "find_and_copy",
-    "Numbered list (write 2–3 things)": "numbered_list",
-    "Multiple choice (tick one)":   "tick_one",
-    "Tick two":                     "tick_two",
-    "True / false table":           "true_false_table",
-    "Sequence events":              "sequencing",
-    "Reason & evidence (3 marks)":  "reason_evidence_table",
-    "Two-part question (a/b)":      "two_part_ab",
-}
 
-
-def _b64_img(path: Path) -> str:
+def _b64_img(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
 
-def _next_weekday(weekday: int) -> date:
+def _next_weekday(weekday):
     today = date.today()
     days_ahead = (weekday - today.weekday()) % 7
     return today + timedelta(days=days_ahead or 7)
@@ -89,168 +85,262 @@ st.title("Being a Reader")
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Core inputs
+# Mode selector
 # ---------------------------------------------------------------------------
+mode = st.radio(
+    "Mode",
+    ["Lesson Mode", "Reading Paper Mode"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Shared inputs
+# ---------------------------------------------------------------------------
+topic = st.text_input(
+    "Topic / text focus",
+    placeholder="e.g. Anglo-Saxons, Sound waves, Charlotte's Web chapter 3",
+)
 key_question = st.text_input(
     "Key question",
     placeholder="e.g. What can objects tell us about how Anglo-Saxons lived?",
 )
 
-text_focus = st.text_input(
-    "Text focus",
-    placeholder="e.g. Anglo-Saxons, Sound waves, Charlotte's Web chapter 3",
-    help="Claude will write a reading extract on this topic.",
-)
+# ---------------------------------------------------------------------------
+# Mode-specific inputs
+# ---------------------------------------------------------------------------
+if mode == "Lesson Mode":
+    st.markdown("**Lesson dates**")
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        st.caption("Vocabulary")
+        voc_date = st.date_input("Vocabulary", value=_next_weekday(1),
+                                  format="DD/MM/YYYY", label_visibility="collapsed")
+    with d2:
+        st.caption("Retrieval")
+        ret_date = st.date_input("Retrieval", value=_next_weekday(3),
+                                  format="DD/MM/YYYY", label_visibility="collapsed")
+    with d3:
+        st.caption("Inference")
+        inf_date = st.date_input("Inference", value=_next_weekday(4),
+                                  format="DD/MM/YYYY", label_visibility="collapsed")
 
-st.markdown("**Lesson dates**")
-date_col1, date_col2, date_col3 = st.columns(3)
-with date_col1:
-    st.caption("Vocabulary")
-    voc_date = st.date_input("Vocabulary", value=_next_weekday(1),
-                              format="DD/MM/YYYY", label_visibility="collapsed")
-with date_col2:
-    st.caption("Retrieval")
-    ret_date = st.date_input("Retrieval", value=_next_weekday(3),
-                              format="DD/MM/YYYY", label_visibility="collapsed")
-with date_col3:
-    st.caption("Inference")
-    inf_date = st.date_input("Inference", value=_next_weekday(4),
-                              format="DD/MM/YYYY", label_visibility="collapsed")
+else:  # Reading Paper Mode
+    rp_col1, rp_col2 = st.columns(2)
+    with rp_col1:
+        text_length_label = st.radio(
+            "Text length",
+            ["Standard (~250 words)", "Extended (~500 words)", "Long (~750 words)"],
+        )
+        text_length = (
+            "long"     if "Long"     in text_length_label else
+            "extended" if "Extended" in text_length_label else
+            "standard"
+        )
+    with rp_col2:
+        num_questions = st.slider("Number of questions", min_value=5, max_value=20, value=10)
 
 # ---------------------------------------------------------------------------
-# Options (optional)
+# Options (both modes)
 # ---------------------------------------------------------------------------
 with st.expander("Options", expanded=False):
 
-    # ── Output selection ──────────────────────────────────────────────────
-    st.markdown("**Select outputs**")
-    o1, o2, o3 = st.columns(3)
-    out_standard  = o1.checkbox("Standard Pupil PDF",  value=True)
-    out_supported = o2.checkbox("Supported Pupil PDF", value=True)
-    out_answers   = o3.checkbox("All Answers PDF",     value=True)
-    o4, o5, _     = st.columns(3)
-    out_pptx      = o4.checkbox("Teaching PPTX",  value=True)
-    out_xlsx      = o5.checkbox("Content XLSX",   value=True)
+    # ── Question types (cognitive) ────────────────────────────────────────
+    st.markdown("**Question types**")
+    st.caption("Leave blank for a balanced mix. Select specific types to restrict what is generated.")
+    qt_labels = list(QUESTION_TYPES.keys())
+    selected_type_labels = st.multiselect(
+        "Question types", qt_labels, default=[],
+        label_visibility="collapsed",
+    )
+    question_types = [QUESTION_TYPES[l] for l in selected_type_labels] or None
+
+    # ── Question layouts (presentation) ──────────────────────────────────
+    st.markdown("**Question layouts**")
+    st.caption("Leave blank for a balanced mix. Select specific layouts to restrict the format.")
+    ql_labels = list(QUESTION_LAYOUTS.keys())
+    selected_layout_labels = st.multiselect(
+        "Question layouts", ql_labels, default=[],
+        label_visibility="collapsed",
+    )
+    question_layouts = [QUESTION_LAYOUTS[l] for l in selected_layout_labels] or None
 
     st.divider()
 
-    # ── Question type focus ───────────────────────────────────────────────
-    st.markdown("**Question type focus**")
-    st.caption(
-        "Leave all unchecked for a balanced mix (recommended). "
-        "Check specific types to restrict what appears in the PDFs."
-    )
-    qt_cols = st.columns(3)
-    selected_labels = []
-    for i, label in enumerate(QUESTION_TYPE_OPTIONS):
-        col = qt_cols[i % 3]
-        if col.checkbox(label, value=False, key=f"qt_{i}"):
-            selected_labels.append(label)
-    # Convert to internal format keys (None = no restriction)
-    allowed_formats = (
-        [QUESTION_TYPE_OPTIONS[l] for l in selected_labels]
-        if selected_labels else None
-    )
-
-    st.divider()
-
-    # ── Text length ───────────────────────────────────────────────────────
-    st.markdown("**Text length**")
-    text_length_label = st.radio(
-        "Text length",
-        ["Standard (200–250 words)", "Extended (400–500 words)"],
-        label_visibility="collapsed",
-        horizontal=True,
-    )
-    text_length = "extended" if "Extended" in text_length_label else "standard"
-
-    # ── Layout ────────────────────────────────────────────────────────────
-    st.markdown("**Layout**")
-    layout_label = st.radio(
-        "Layout",
-        [
-            "Integrated — text and questions on the same page",
-            "SATs style — separate text booklet and question paper",
-        ],
-        label_visibility="collapsed",
-    )
-    layout = "sats" if "SATs" in layout_label else "integrated"
-
-    if layout == "sats":
-        st.caption(
-            "SATs style produces an additional Text Booklet PDF. "
-            "Questions reference the booklet by paragraph rather than repeating the text."
+    # ── Text length (Lesson Mode only — Reading Paper has its own control) ─
+    if mode == "Lesson Mode":
+        st.markdown("**Text length**")
+        tl_label = st.radio(
+            "Text length",
+            ["Standard (~250 words)", "Extended (~500 words)", "Long (~750 words)"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        text_length = (
+            "long"     if "Long"     in tl_label else
+            "extended" if "Extended" in tl_label else
+            "standard"
         )
 
+        st.divider()
+
+        # ── Layout (Lesson Mode only) ────────────────────────────────────
+        st.markdown("**Layout**")
+        layout_label = st.radio(
+            "Layout",
+            ["Combined text and questions", "Separate text and questions"],
+            label_visibility="collapsed",
+        )
+        layout = "sats" if "Separate" in layout_label else "integrated"
+
+        st.divider()
+
+        # ── Output selection (Lesson Mode only) ───────────────────────────
+        st.markdown("**Outputs**")
+        oc1, oc2, oc3 = st.columns(3)
+        out_standard  = oc1.checkbox("Standard Pupil PDF",  value=True)
+        out_supported = oc2.checkbox("Supported Pupil PDF", value=True)
+        out_answers   = oc3.checkbox("All Answers PDF",     value=True)
+        oc4, oc5, _   = st.columns(3)
+        out_pptx      = oc4.checkbox("Teaching PPTX", value=True)
+        out_xlsx      = oc5.checkbox("Content XLSX",  value=True)
+
+        st.divider()
+
+    # ── Learning label (both modes) ───────────────────────────────────────
+    st.markdown("**Learning label**")
+    st.caption(
+        "When on, a learning label appears in the top-left of the first questions page. "
+        "In Lesson Mode the label content is set automatically per lesson type."
+    )
+    include_label = st.checkbox("Include learning label", value=True)
+
+    custom_label = ""
+    if include_label and mode == "Reading Paper Mode":
+        custom_label = st.text_input(
+            "Label text",
+            placeholder="e.g. T5W3 Reading Practice — Anglo-Saxons",
+            help="This appears as the learning label on the questions page.",
+        )
+
+    # ── Curriculum context ────────────────────────────────────────────────
+    st.divider()
+    st.markdown("**Curriculum context** *(optional)*")
+    context = st.text_area(
+        "context",
+        placeholder=(
+            "Give Claude context about your current unit so the text fits. "
+            "e.g. Y4 history — children have studied Anglo-Saxon settlements and trade."
+        ),
+        height=70,
+        label_visibility="collapsed",
+    )
+
 # ---------------------------------------------------------------------------
-# Generate
+# Generate button
 # ---------------------------------------------------------------------------
 st.divider()
-ready = bool(key_question.strip()) and bool(text_focus.strip())
-
+ready = bool(topic.strip()) and bool(key_question.strip())
 if not ready:
-    st.info("Enter a key question and text focus to generate resources.")
+    st.info("Enter a topic and key question to generate resources.")
 
 if st.button("Generate resources", type="primary",
              disabled=not ready, use_container_width=True):
 
-    with st.spinner("Generating reading extract and questions… (20–40 seconds)"):
-        try:
-            content = generate_content(
-                topic=text_focus,
-                key_question=key_question,
-                vocab_day=voc_date.strftime("%A"),
-                vocab_date=voc_date.strftime("%-d %B %Y"),
-                vocab_i_can=I_CAN["vocabulary"],
-                retrieval_day=ret_date.strftime("%A"),
-                retrieval_date=ret_date.strftime("%-d %B %Y"),
-                retrieval_i_can=I_CAN["retrieval"],
-                inference_day=inf_date.strftime("%A"),
-                inference_date=inf_date.strftime("%-d %B %Y"),
-                inference_i_can=I_CAN["inference"],
-                allowed_formats=allowed_formats,
-                text_length=text_length,
-            )
-        except ValueError as e:
-            st.error(f"Generation failed: {e}")
-            st.stop()
-        except Exception as e:
-            st.error(f"Unexpected error: {e}")
-            st.stop()
+    # ── Call the appropriate generator ────────────────────────────────────
+    if mode == "Lesson Mode":
+        with st.spinner("Generating reading extract and lessons… (20–40 seconds)"):
+            try:
+                content = generate_content(
+                    topic=topic,
+                    key_question=key_question,
+                    vocab_day=voc_date.strftime("%A"),
+                    vocab_date=voc_date.strftime("%-d %B %Y"),
+                    vocab_i_can=I_CAN["vocabulary"],
+                    retrieval_day=ret_date.strftime("%A"),
+                    retrieval_date=ret_date.strftime("%-d %B %Y"),
+                    retrieval_i_can=I_CAN["retrieval"],
+                    inference_day=inf_date.strftime("%A"),
+                    inference_date=inf_date.strftime("%-d %B %Y"),
+                    inference_i_can=I_CAN["inference"],
+                    context=context,
+                    question_types=question_types,
+                    question_layouts=question_layouts,
+                    text_length=text_length,
+                )
+            except (ValueError, Exception) as e:
+                st.error(f"Generation failed: {e}")
+                st.stop()
+
+    else:  # Reading Paper Mode
+        with st.spinner(f"Generating reading paper ({num_questions} questions)… (20–50 seconds)"):
+            try:
+                content = generate_reading_paper(
+                    topic=topic,
+                    key_question=key_question,
+                    num_questions=num_questions,
+                    text_length=text_length,
+                    question_types=question_types,
+                    question_layouts=question_layouts,
+                    context=context,
+                )
+            except (ValueError, Exception) as e:
+                st.error(f"Generation failed: {e}")
+                st.stop()
 
     generated_text = content.get("standard_text", "")
-    for lesson in content["lessons"]:
+
+    # Inject text into lesson dicts (Lesson Mode only)
+    for lesson in content.get("lessons", []):
         lesson["text"] = generated_text
 
     tmp = tempfile.mkdtemp()
     try:
-        with st.spinner("Building PDFs…"):
-            pdf_paths = build_pdfs(
-                content=content,
-                icon_path=str(ICON_PATH) if ICON_PATH.exists() else "",
-                output_dir=tmp,
-                layout=layout,
-            )
+        week_ref = date.today().strftime("%d%b").upper()
 
-        pptx_path = None
-        if out_pptx and PPTX_AVAILABLE and TEMPLATE_PATH.exists():
-            with st.spinner("Building PPTX…"):
-                pptx_path = os.path.join(tmp, "Teaching_Slides.pptx")
-                try:
-                    build_pptx(content=content, template_path=str(TEMPLATE_PATH),
-                                output_path=pptx_path)
-                except Exception as e:
-                    st.warning(f"PPTX skipped: {e}")
-                    pptx_path = None
+        if mode == "Lesson Mode":
+            week_ref = voc_date.strftime("%d%b").upper()
 
-        if out_xlsx:
-            with st.spinner("Building Excel…"):
-                xlsx_path = os.path.join(tmp, "Reading_Content.xlsx")
-                build_excel(content=content, output_path=xlsx_path)
-        else:
+            with st.spinner("Building PDFs…"):
+                pdf_paths = build_pdfs(
+                    content=content,
+                    icon_path=str(ICON_PATH) if ICON_PATH.exists() else "",
+                    output_dir=tmp,
+                    layout=layout,
+                )
+
+            pptx_path = None
+            if out_pptx and PPTX_AVAILABLE and TEMPLATE_PATH.exists():
+                with st.spinner("Building PPTX…"):
+                    pptx_path = os.path.join(tmp, "Teaching_Slides.pptx")
+                    try:
+                        build_pptx(content=content, template_path=str(TEMPLATE_PATH),
+                                    output_path=pptx_path)
+                    except Exception as e:
+                        st.warning(f"PPTX skipped: {e}")
+                        pptx_path = None
+
+            xlsx_path = None
+            if out_xlsx:
+                with st.spinner("Building Excel…"):
+                    xlsx_path = os.path.join(tmp, "Reading_Content.xlsx")
+                    build_excel(content=content, output_path=xlsx_path)
+
+        else:  # Reading Paper Mode
+            with st.spinner("Building reading paper PDFs…"):
+                pdf_paths = build_reading_paper_pdfs(
+                    content=content,
+                    icon_path=str(ICON_PATH) if ICON_PATH.exists() else "",
+                    output_dir=tmp,
+                    include_label=include_label,
+                    custom_label=custom_label,
+                )
+            pptx_path = None
             xlsx_path = None
 
-        # ── Preview ───────────────────────────────────────────────────────
+        # ── Preview generated text ────────────────────────────────────────
         if generated_text:
             with st.expander("Preview reading extract"):
                 st.write(generated_text)
@@ -258,36 +348,44 @@ if st.button("Generate resources", type="primary",
         st.success("Done!")
         st.divider()
 
-        week_ref = voc_date.strftime("%d%b").upper()
-
-        # Collect downloads
+        # ── Download buttons ──────────────────────────────────────────────
         downloads = []
-        if out_standard and "standard" in pdf_paths:
-            downloads.append((pdf_paths["standard"], "📄 Standard Pupil",
-                               "application/pdf",
-                               f"BeingAReader_{week_ref}_Standard.pdf"))
-        if out_supported and "supported" in pdf_paths:
-            downloads.append((pdf_paths["supported"], "📄 Supported Pupil",
-                               "application/pdf",
-                               f"BeingAReader_{week_ref}_Supported.pdf"))
-        if out_answers and "answers" in pdf_paths:
-            downloads.append((pdf_paths["answers"], "📄 All Answers",
-                               "application/pdf",
-                               f"BeingAReader_{week_ref}_Answers.pdf"))
-        if layout == "sats" and "text_booklet" in pdf_paths:
-            downloads.append((pdf_paths["text_booklet"], "📄 Text Booklet",
-                               "application/pdf",
-                               f"BeingAReader_{week_ref}_TextBooklet.pdf"))
-        if pptx_path and os.path.exists(pptx_path):
-            downloads.append((pptx_path, "📊 Teaching PPTX",
-                               "application/vnd.openxmlformats-officedocument"
-                               ".presentationml.presentation",
-                               f"BeingAReader_{week_ref}_Teaching.pptx"))
+
+        if mode == "Lesson Mode":
+            if out_standard and "standard" in pdf_paths:
+                downloads.append((pdf_paths["standard"], "📄 Standard Pupil",
+                                   "application/pdf",
+                                   f"BeingAReader_{week_ref}_Standard.pdf"))
+            if out_supported and "supported" in pdf_paths:
+                downloads.append((pdf_paths["supported"], "📄 Supported Pupil",
+                                   "application/pdf",
+                                   f"BeingAReader_{week_ref}_Supported.pdf"))
+            if out_answers and "answers" in pdf_paths:
+                downloads.append((pdf_paths["answers"], "📄 All Answers",
+                                   "application/pdf",
+                                   f"BeingAReader_{week_ref}_Answers.pdf"))
+            if layout == "sats" and "text_booklet" in pdf_paths:
+                downloads.append((pdf_paths["text_booklet"], "📄 Text Booklet",
+                                   "application/pdf",
+                                   f"BeingAReader_{week_ref}_TextBooklet.pdf"))
+            if pptx_path and os.path.exists(pptx_path):
+                downloads.append((pptx_path, "📊 Teaching PPTX",
+                                   "application/vnd.openxmlformats-officedocument"
+                                   ".presentationml.presentation",
+                                   f"BeingAReader_{week_ref}_Teaching.pptx"))
+
+        else:  # Reading Paper Mode
+            downloads.append((pdf_paths["text"],        "📄 Text",
+                               "application/pdf", f"ReadingPaper_{week_ref}_Text.pdf"))
+            downloads.append((pdf_paths["questions"],   "📄 Questions",
+                               "application/pdf", f"ReadingPaper_{week_ref}_Questions.pdf"))
+            downloads.append((pdf_paths["mark_scheme"], "📄 Mark Scheme",
+                               "application/pdf", f"ReadingPaper_{week_ref}_MarkScheme.pdf"))
 
         if downloads:
-            dl_cols = st.columns(min(len(downloads), 4))
+            cols = st.columns(min(len(downloads), 4))
             for i, (path, label, mime, filename) in enumerate(downloads):
-                col = dl_cols[i % len(dl_cols)]
+                col = cols[i % len(cols)]
                 if path and os.path.exists(path):
                     with open(path, "rb") as f:
                         col.download_button(label=label, data=f.read(),
@@ -299,8 +397,7 @@ if st.button("Generate resources", type="primary",
                 st.download_button(
                     label="📊 Content XLSX", data=f.read(),
                     file_name=f"BeingAReader_{week_ref}_Content.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument"
-                         ".spreadsheetml.sheet",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
     finally:
