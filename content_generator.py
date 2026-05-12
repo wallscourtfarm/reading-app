@@ -399,12 +399,21 @@ REQUIRED_FORMAT_DATA = {
 }
 
 
+def _coerce_str(val):
+    """Coerce a field value to string — handles list returns from Claude."""
+    if isinstance(val, list):
+        return " / ".join(str(v) for v in val)
+    return str(val) if val is not None else ""
+
+
 def _validate_question(q, lesson_label=""):
     prefix = f"{lesson_label} Q{q.get('number','?')}"
-    fmt = q.get("format", "")
+    fmt = q.get("format", "") or ""  # guard against None
+    if not fmt:
+        raise ValueError(f"{prefix}: format field is missing or empty")
     if fmt not in VALID_FORMATS:
         raise ValueError(f"{prefix}: unknown format '{fmt}'")
-    fd = q.get("format_data", {})
+    fd = q.get("format_data", {}) or {}
     missing = REQUIRED_FORMAT_DATA.get(fmt, set()) - set(fd.keys())
     if missing:
         raise ValueError(f"{prefix} format_data missing keys: {missing}")
@@ -423,9 +432,14 @@ def _validate_question(q, lesson_label=""):
             raise ValueError(f"{prefix}: true_false_table needs 4–5 statements, got {n}")
     if not q.get("marks", 0):
         raise ValueError(f"{prefix}: missing marks")
-    for field in ("text_reference", "question", "answer"):
-        if not q.get(field, "").strip():
+    # Required text fields — use _coerce_str to handle list returns from Claude
+    for field in ("text_reference", "question"):
+        if not _coerce_str(q.get(field, "")).strip():
             raise ValueError(f"{prefix}: missing '{field}'")
+    # two_part_ab stores answers inside format_data.parts — skip top-level answer check
+    if fmt != "two_part_ab":
+        if not _coerce_str(q.get("answer", "")).strip():
+            raise ValueError(f"{prefix}: missing 'answer'")
 
 
 def _validate_lesson(data):

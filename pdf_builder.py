@@ -42,6 +42,17 @@ LIGHT_GREY = (0.94,  0.94,  0.94 )  # table cell backgrounds
 TICK_CELL  = (0.85,  0.95,  0.85 )  # answer highlight cell
 
 
+def _coerce_answer(q):
+    """
+    Return the answer field as a plain string.
+    Guards against Claude occasionally returning a list instead of a string.
+    """
+    val = q.get('answer', '')
+    if isinstance(val, list):
+        return ' / '.join(str(v) for v in val)
+    return str(val) if val is not None else ''
+
+
 # ===========================================================================
 # Low-level drawing utilities
 # ===========================================================================
@@ -461,7 +472,7 @@ def render_two_part_ab_pupil(c, q, y, is_supported):
 # ===========================================================================
 
 def render_open_line_answer(c, q, y):
-    answer = q.get('answer', '')
+    answer = _coerce_answer(q)
     c.setFillColorRGB(*GREEN)
     c.setFont("Helvetica-Oblique", 8.5)
     ans_lines = wrap_text(c, answer, "Helvetica-Oblique", 8.5, CW)
@@ -472,7 +483,7 @@ def render_open_line_answer(c, q, y):
 
 
 def render_find_and_copy_answer(c, q, y):
-    target = q['format_data'].get('target_word', q.get('answer', ''))
+    target = q['format_data'].get('target_word', _coerce_answer(q))
     c.setFont("Helvetica-BoldOblique", 9)
     c.setFillColorRGB(*GREEN)
     c.drawString(MARGIN, y - 4 * mm, f"\u2714  {target}")
@@ -480,7 +491,7 @@ def render_find_and_copy_answer(c, q, y):
 
 
 def render_numbered_list_answer(c, q, y):
-    answer = q.get('answer', '')
+    answer = _coerce_answer(q)
     n = q['format_data'].get('num_points', 2)
     import re
     matches = re.split(r'\d+\.\s+', answer)
@@ -621,7 +632,7 @@ def render_reason_evidence_answer(c, q, y):
     fd = q['format_data']
     example = fd.get('example', {})
     blank_rows = fd.get('rows', 2)
-    answer = q.get('answer', '')
+    answer = _coerce_answer(q)
     col_r = CW * 0.42
     col_e = CW - col_r
     header_h = 6 * mm
@@ -824,7 +835,7 @@ def _draw_ms_award_header(c, q, y):
 
 def render_ms_open_flowing(c, q, y):
     """Flowing mark scheme for open_line (2–3 marks), numbered_list, two_part_ab."""
-    answer = q.get('answer', '').strip()
+    answer = _coerce_answer(q).strip()
 
     # "Accept:" header
     c.setFont("Helvetica-Bold", 8.5)
@@ -871,7 +882,7 @@ def render_ms_open_flowing(c, q, y):
 
 def render_ms_reason_evidence_flowing(c, q, y):
     """Flowing mark scheme for reason_evidence_table questions."""
-    answer = q.get('answer', '').strip()
+    answer = _coerce_answer(q).strip()
 
     # Parse "reason | evidence" rows
     rows = []
@@ -949,7 +960,7 @@ def estimate_ms_height(c, q):
     if fmt == 'open_line' and marks == 1:
         return stem_h + award_h + 15 * mm
 
-    answer = q.get('answer', '').strip()
+    answer = _coerce_answer(q).strip()
 
     if fmt == 'reason_evidence_table':
         rows = [r for r in answer.split('\n') if r.strip() and '|' in r]
@@ -1374,6 +1385,17 @@ def _build_reading_paper_text_pages(tmp_dir, text, title, font_size=11):
 
             if ty - seg_h < box_bottom + padding:
                 break
+
+            # Keep heading with its following body — don't let it sit alone at page bottom
+            if is_heading and seg_idx + 1 < len(segments):
+                next_is_h, next_content = segments[seg_idx + 1]
+                next_font = "Helvetica-Bold" if next_is_h else "Helvetica"
+                next_lh   = lh_head if next_is_h else lh_body
+                next_lines = wrap_text(c, next_content, next_font, font_size, CW - 6 * mm)
+                # Require at least 2 lines of the next segment to fit on this page too
+                min_follow_h = next_lh * min(2, len(next_lines)) + seg_gap
+                if ty - seg_h - min_follow_h < box_bottom + padding:
+                    break  # push heading onto next page with its content
 
             c.setFont(font, font_size)
             for line in lines:
