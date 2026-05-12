@@ -206,11 +206,6 @@ def draw_text_box(c, text, y_top, font_size=10):
 # ===========================================================================
 
 def draw_preamble(c, q, y):
-    """
-    Draw text_reference (small grey italic) and question number + text.
-    Returns y after question text, and the indent width used for the number.
-    """
-    # text_reference
     ref = q.get('text_reference', '').strip()
     if ref:
         c.setFont("Helvetica-Oblique", 7.5)
@@ -218,7 +213,6 @@ def draw_preamble(c, q, y):
         c.drawString(MARGIN, y, ref)
         y -= 7.5 * 1.3
 
-    # Question number + text
     c.setFillColorRGB(*DARK)
     c.setFont("Helvetica-Bold", 9)
     label = f"{q['number']}. "
@@ -226,7 +220,6 @@ def draw_preamble(c, q, y):
     c.drawString(MARGIN, y, label)
 
     qtext = q.get('question', '')
-    # If question contains a quoted line (separated by \n\n), draw quote first
     parts = qtext.split('\n\n', 1)
     if len(parts) == 2:
         quote, question_body = parts
@@ -249,7 +242,6 @@ def draw_preamble(c, q, y):
 
 
 def draw_scaffold(c, scaffold, y):
-    """Draw the supported scaffold hint in italic below the question."""
     if not scaffold:
         return y
     c.setFont("Helvetica-Oblique", 8)
@@ -277,7 +269,6 @@ def render_open_line_pupil(c, q, y, is_supported):
 
 
 def render_find_and_copy_pupil(c, q, y, is_supported):
-    # Short blank line for one word/phrase
     c.setFont("Helvetica", 8)
     c.setFillColorRGB(*DARK)
     c.drawString(MARGIN, y - 3 * mm, "_______________________________________________")
@@ -295,7 +286,6 @@ def render_numbered_list_pupil(c, q, y, is_supported):
     c.setFillColorRGB(*DARK)
     for i in range(n):
         c.drawString(MARGIN, y - (i * (gap * 2)) - 3 * mm, f"{i + 1}.")
-        # Two ruled lines per point
         c.line(MARGIN + 5 * mm, y - (i * (gap * 2)) - gap, MARGIN + CW, y - (i * (gap * 2)) - gap)
         c.line(MARGIN + 5 * mm, y - (i * (gap * 2)) - gap * 2, MARGIN + CW, y - (i * (gap * 2)) - gap * 2)
     return y - n * gap * 2 - 2 * mm
@@ -349,7 +339,6 @@ def render_true_false_table_pupil(c, q, y):
     col_tf = CW * 0.14
     row_h = 7 * mm
 
-    # Header row
     c.setFillColorRGB(*BOX_BORDER)
     c.rect(MARGIN, y - row_h, CW, row_h, fill=1, stroke=0)
     c.setFillColorRGB(1, 1, 1)
@@ -359,7 +348,6 @@ def render_true_false_table_pupil(c, q, y):
     c.drawCentredString(MARGIN + col_stmt + col_tf + col_tf / 2, y - row_h + 2 * mm, "False")
     y -= row_h
 
-    # Statement rows
     c.setStrokeColorRGB(*GREY_LINE)
     c.setLineWidth(0.4)
     for i, stmt in enumerate(statements):
@@ -369,7 +357,6 @@ def render_true_false_table_pupil(c, q, y):
         c.setFillColorRGB(*DARK)
         c.setFont("Helvetica", 8)
         c.drawString(MARGIN + 2 * mm, y - row_h + 2 * mm, stmt.get('text', ''))
-        # Dividers between T/F columns
         c.setLineWidth(0.3)
         c.line(MARGIN + col_stmt, y, MARGIN + col_stmt, y - row_h)
         c.line(MARGIN + col_stmt + col_tf, y, MARGIN + col_stmt + col_tf, y - row_h)
@@ -388,7 +375,6 @@ def render_sequencing_pupil(c, q, y):
     c.setFillColorRGB(*DARK)
     for i, item in enumerate(items):
         ry = y - i * row_h
-        # Small square box for number
         c.setFillColorRGB(1, 1, 1)
         c.setStrokeColorRGB(*BOX_BORDER)
         c.setLineWidth(0.5)
@@ -408,7 +394,6 @@ def render_reason_evidence_pupil(c, q, y):
     header_h = 6 * mm
     row_h = 11 * mm
 
-    # Header
     c.setFillColorRGB(*BOX_BORDER)
     c.rect(MARGIN, y - header_h, col_r, header_h, fill=1, stroke=0)
     c.rect(MARGIN + col_r, y - header_h, col_e, header_h, fill=1, stroke=0)
@@ -418,7 +403,6 @@ def render_reason_evidence_pupil(c, q, y):
     c.drawCentredString(MARGIN + col_r + col_e / 2, y - header_h + 2 * mm, "Evidence")
     y -= header_h
 
-    # Example row (shaded)
     c.setFillColorRGB(*LIGHT_GREY)
     c.setStrokeColorRGB(*GREY_LINE)
     c.setLineWidth(0.4)
@@ -438,7 +422,6 @@ def render_reason_evidence_pupil(c, q, y):
         ry -= 8 * 1.3
     y -= row_h
 
-    # Blank rows
     for _ in range(blank_rows):
         c.setFillColorRGB(1, 1, 1)
         c.setStrokeColorRGB(*GREY_LINE)
@@ -465,7 +448,6 @@ def render_two_part_ab_pupil(c, q, y, is_supported):
         for i, line in enumerate(pq_lines):
             c.drawString(MARGIN + 3 * mm + plw, y - i * (8.5 * 1.35), line)
         y -= len(pq_lines) * (8.5 * 1.35) + 1 * mm
-        # One answer line per part
         c.setStrokeColorRGB(*GREY_LINE)
         c.setLineWidth(0.4)
         c.line(MARGIN + 3 * mm, y - 6 * mm, MARGIN + CW, y - 6 * mm)
@@ -500,8 +482,6 @@ def render_find_and_copy_answer(c, q, y):
 def render_numbered_list_answer(c, q, y):
     answer = q.get('answer', '')
     n = q['format_data'].get('num_points', 2)
-    # Try to split on "1." / "2." etc.
-    parts = []
     import re
     matches = re.split(r'\d+\.\s+', answer)
     parts = [p.strip() for p in matches if p.strip()]
@@ -537,10 +517,7 @@ def render_tick_one_answer(c, q, y):
             x = MARGIN + col * col_w
             ry = y - row * row_h
             is_correct = (idx == correct_i)
-            if is_correct:
-                c.setFillColorRGB(*TICK_CELL)
-            else:
-                c.setFillColorRGB(1, 1, 1)
+            c.setFillColorRGB(*TICK_CELL) if is_correct else c.setFillColorRGB(1, 1, 1)
             c.rect(x, ry - row_h, col_w, row_h, fill=1, stroke=1)
             if is_correct:
                 c.setFillColorRGB(*GREEN)
@@ -585,7 +562,6 @@ def render_true_false_table_answer(c, q, y):
     col_tf = CW * 0.14
     row_h = 7 * mm
 
-    # Header
     c.setFillColorRGB(*BOX_BORDER)
     c.rect(MARGIN, y - row_h, CW, row_h, fill=1, stroke=0)
     c.setFillColorRGB(1, 1, 1)
@@ -606,13 +582,11 @@ def render_true_false_table_answer(c, q, y):
         c.drawString(MARGIN + 2 * mm, y - row_h + 2 * mm, stmt.get('text', ''))
         c.line(MARGIN + col_stmt, y, MARGIN + col_stmt, y - row_h)
         c.line(MARGIN + col_stmt + col_tf, y, MARGIN + col_stmt + col_tf, y - row_h)
-
-        # Tick the correct column
         is_true = stmt.get('correct', False)
-        tick_x_centre = (MARGIN + col_stmt + col_tf / 2) if is_true else (MARGIN + col_stmt + col_tf + col_tf / 2)
+        tick_x = (MARGIN + col_stmt + col_tf / 2) if is_true else (MARGIN + col_stmt + col_tf + col_tf / 2)
         c.setFillColorRGB(*GREEN)
         c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(tick_x_centre, y - row_h + 2 * mm, "\u2714")
+        c.drawCentredString(tick_x, y - row_h + 2 * mm, "\u2714")
         y -= row_h
 
     return y - 2 * mm
@@ -622,14 +596,12 @@ def render_sequencing_answer(c, q, y):
     fd = q['format_data']
     correct_order = fd.get('items', [])
     shuffled = deterministic_shuffle(correct_order)
-    # Build a map: item text → correct position (1-based)
     position = {item: str(i + 1) for i, item in enumerate(correct_order)}
     row_h = 6 * mm
     box_sz = 4.5 * mm
 
     for i, item in enumerate(shuffled):
         ry = y - i * row_h
-        # Green filled box with correct number
         c.setFillColorRGB(*TICK_CELL)
         c.setStrokeColorRGB(*BOX_BORDER)
         c.setLineWidth(0.5)
@@ -653,9 +625,8 @@ def render_reason_evidence_answer(c, q, y):
     col_r = CW * 0.42
     col_e = CW - col_r
     header_h = 6 * mm
-    row_h = 13 * mm   # slightly taller rows for mark scheme — multiple alternatives may wrap
+    row_h = 13 * mm
 
-    # Parse "reason | evidence" rows from answer field
     ans_pairs = []
     for raw in answer.strip().split('\n'):
         raw = raw.strip()
@@ -665,7 +636,6 @@ def render_reason_evidence_answer(c, q, y):
     while len(ans_pairs) < blank_rows:
         ans_pairs.append(('', ''))
 
-    # Header
     c.setFillColorRGB(*BOX_BORDER)
     c.rect(MARGIN, y - header_h, col_r, header_h, fill=1, stroke=0)
     c.rect(MARGIN + col_r, y - header_h, col_e, header_h, fill=1, stroke=0)
@@ -675,7 +645,6 @@ def render_reason_evidence_answer(c, q, y):
     c.drawCentredString(MARGIN + col_r + col_e / 2, y - header_h + 2 * mm, "Evidence")
     y -= header_h
 
-    # Example row (shaded — pre-filled on pupil paper)
     c.setFillColorRGB(*LIGHT_GREY)
     c.setStrokeColorRGB(*GREY_LINE)
     c.setLineWidth(0.4)
@@ -693,7 +662,6 @@ def render_reason_evidence_answer(c, q, y):
         ry -= 8 * 1.3
     y -= row_h
 
-    # Mark scheme rows — green, with alternatives separated by " / "
     for i in range(blank_rows):
         c.setFillColorRGB(*TICK_CELL)
         c.setStrokeColorRGB(*GREY_LINE)
@@ -707,23 +675,15 @@ def render_reason_evidence_answer(c, q, y):
         if reason_text or evid_text:
             c.setFillColorRGB(*GREEN)
             c.setFont("Helvetica-Oblique", 8)
-
-            # Reason cell
             ry = y - 3 * mm
-            # If "/" alternatives, show "Accept:" prefix on first line
-            r_lines = wrap_text(c, reason_text, "Helvetica-Oblique", 8, col_r - 4 * mm)
-            for line in r_lines:
+            for line in wrap_text(c, reason_text, "Helvetica-Oblique", 8, col_r - 4 * mm):
                 c.drawString(MARGIN + 2 * mm, ry, line)
                 ry -= 8 * 1.3
-
-            # Evidence cell
             ry = y - 3 * mm
-            e_lines = wrap_text(c, evid_text, "Helvetica-Oblique", 8, col_e - 4 * mm)
-            for line in e_lines:
+            for line in wrap_text(c, evid_text, "Helvetica-Oblique", 8, col_e - 4 * mm):
                 c.drawString(MARGIN + col_r + 2 * mm, ry, line)
                 ry -= 8 * 1.3
         else:
-            # No answer — show placeholder
             c.setFillColorRGB(0.7, 0.7, 0.7)
             c.setFont("Helvetica-Oblique", 7.5)
             c.drawString(MARGIN + 2 * mm, y - row_h + 3 * mm, "See mark scheme")
@@ -757,17 +717,12 @@ def render_two_part_ab_answer(c, q, y):
 
 
 # ===========================================================================
-# Height estimation (for overflow checking)
+# Height estimation (for pupil/answer overflow checking)
 # ===========================================================================
 
 def estimate_height(c, q):
-    """
-    Estimate the height (in points) that a question will occupy.
-    Used to decide whether Q7 (or Q5) fits before drawing.
-    """
     ref_h = 7.5 * 1.3 if q.get('text_reference', '').strip() else 0
     qtext = q.get('question', '')
-    # Estimate label width (e.g. "7. ")
     lw = c.stringWidth(f"{q['number']}. ", "Helvetica-Bold", 9)
     q_lines = wrap_text(c, qtext.split('\n\n')[-1], "Helvetica-Bold", 9, CW - lw)
     q_text_h = len(q_lines) * 9 * 1.35 + 1 * mm
@@ -800,19 +755,231 @@ def estimate_height(c, q):
 
 
 # ===========================================================================
-# Single question renderer (dispatches by format)
+# Mark scheme — flowing renderers
+# ===========================================================================
+
+def _ms_award_text(marks):
+    """Return list of award criteria lines for a given mark value."""
+    if marks == 1:
+        return ["Award 1 mark for an acceptable answer."]
+    elif marks == 2:
+        return ["Award 1 mark per acceptable point (up to 2 marks)."]
+    elif marks == 3:
+        return [
+            "Award 3 marks for two acceptable points, at least one with evidence.",
+            "Award 2 marks for two acceptable points or one point with evidence.",
+            "Award 1 mark for one acceptable point.",
+        ]
+    return [f"Award up to {marks} marks."]
+
+
+def render_ms_open_flowing(c, q, y):
+    """Flowing mark scheme for open_line (2–3 marks), numbered_list, two_part_ab."""
+    answer = q.get('answer', '').strip()
+    marks  = q.get('marks', 1)
+
+    # Award criteria lines
+    c.setFont("Helvetica-Oblique", 8)
+    c.setFillColorRGB(0.3, 0.3, 0.3)
+    for line in _ms_award_text(marks):
+        for wrapped in wrap_text(c, line, "Helvetica-Oblique", 8, CW):
+            c.drawString(MARGIN, y - 3.5 * mm, wrapped)
+            y -= 8 * 1.35
+    y -= 2 * mm
+
+    # "Accept:" header
+    c.setFont("Helvetica-Bold", 8.5)
+    c.setFillColorRGB(*GREEN)
+    c.drawString(MARGIN, y - 3 * mm, "Accept:")
+    y -= 8.5 * 1.4 + 1 * mm
+
+    # Alternatives as bullets
+    alternatives = [a.strip() for a in answer.replace('\n', '/').split('/') if a.strip()]
+    if not alternatives:
+        alternatives = [answer] if answer else ['\u2014']
+
+    c.setFont("Helvetica", 8.5)
+    c.setFillColorRGB(*GREEN)
+    bullet = "\u2022  "
+    bw = c.stringWidth(bullet, "Helvetica", 8.5)
+    for alt in alternatives:
+        c.drawString(MARGIN + 3 * mm, y - 3 * mm, bullet)
+        alt_lines = wrap_text(c, alt, "Helvetica", 8.5, CW - 3 * mm - bw)
+        for i, ln in enumerate(alt_lines):
+            c.drawString(MARGIN + 3 * mm + bw, y - 3 * mm - i * (8.5 * 1.35), ln)
+        y -= len(alt_lines) * (8.5 * 1.35) + 2 * mm
+
+    # "Do not accept" block if present
+    do_not = q.get('do_not_accept', '').strip()
+    if do_not:
+        y -= 2 * mm
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColorRGB(0.72, 0.18, 0.18)
+        c.drawString(MARGIN, y - 3 * mm, "Do not accept:")
+        y -= 8 * 1.4
+        c.setFont("Helvetica-Oblique", 8)
+        c.setFillColorRGB(0.72, 0.18, 0.18)
+        for ln in wrap_text(c, do_not, "Helvetica-Oblique", 8, CW - 3 * mm):
+            c.drawString(MARGIN + 3 * mm, y - 3 * mm, ln)
+            y -= 8 * 1.35
+
+    y -= 3 * mm
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.3)
+    c.line(MARGIN, y, MARGIN + CW, y)
+    return y - 4 * mm
+
+
+def render_ms_reason_evidence_flowing(c, q, y):
+    """Flowing mark scheme for reason_evidence_table questions."""
+    answer = q.get('answer', '').strip()
+    marks  = q.get('marks', 3)
+
+    # Award criteria
+    c.setFont("Helvetica-Oblique", 8)
+    c.setFillColorRGB(0.3, 0.3, 0.3)
+    for line in _ms_award_text(marks):
+        for wrapped in wrap_text(c, line, "Helvetica-Oblique", 8, CW):
+            c.drawString(MARGIN, y - 3.5 * mm, wrapped)
+            y -= 8 * 1.35
+    y -= 2 * mm
+
+    # Parse "reason | evidence" rows
+    rows = []
+    for raw in answer.split('\n'):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if '|' in raw:
+            r, e = raw.split('|', 1)
+            rows.append((r.strip(), e.strip()))
+        else:
+            rows.append((raw, ''))
+
+    # "Acceptable points" header
+    c.setFont("Helvetica-Bold", 8.5)
+    c.setFillColorRGB(*BOX_BORDER)
+    c.drawString(MARGIN, y - 3 * mm, "Acceptable points")
+    y -= 8.5 * 1.4 + 1 * mm
+
+    for i, (reason, evidence) in enumerate(rows, 1):
+        # Numbered reason
+        num_label = f"{i}.  "
+        nw = c.stringWidth(num_label, "Helvetica-Bold", 8.5)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(*GREEN)
+        c.drawString(MARGIN + 2 * mm, y - 3 * mm, num_label)
+        reason_display = " / ".join(r.strip() for r in reason.split('/') if r.strip())
+        r_lines = wrap_text(c, reason_display, "Helvetica-Bold", 8.5, CW - nw - 2 * mm)
+        for j, ln in enumerate(r_lines):
+            c.drawString(MARGIN + 2 * mm + nw, y - 3 * mm - j * (8.5 * 1.35), ln)
+        y -= len(r_lines) * (8.5 * 1.35) + 1 * mm
+
+        # Evidence bullets
+        if evidence:
+            ev_alts = [e.strip() for e in evidence.split('/') if e.strip()]
+            bullet = "\u2022  "
+            bw = c.stringWidth(bullet, "Helvetica", 8)
+            c.setFont("Helvetica", 8)
+            c.setFillColorRGB(*GREEN)
+            for ev in ev_alts:
+                c.drawString(MARGIN + 8 * mm, y - 2.5 * mm, bullet)
+                ev_lines = wrap_text(c, ev, "Helvetica", 8, CW - 8 * mm - bw)
+                for k, ln in enumerate(ev_lines):
+                    c.drawString(MARGIN + 8 * mm + bw, y - 2.5 * mm - k * (8 * 1.35), ln)
+                y -= len(ev_lines) * (8 * 1.35) + 1.5 * mm
+
+        y -= 2 * mm
+
+    c.setStrokeColorRGB(*GREY_LINE)
+    c.setLineWidth(0.3)
+    c.line(MARGIN, y, MARGIN + CW, y)
+    return y - 4 * mm
+
+
+def estimate_ms_height(c, q):
+    """Estimate mark scheme height. More generous than pupil estimate."""
+    fmt   = q.get('format', 'open_line')
+    marks = q.get('marks', 1)
+
+    qtext = q.get('question', '')
+    lw = c.stringWidth(f"{q['number']}. ", "Helvetica-Bold", 9)
+    q_lines = wrap_text(c, qtext.split('\n\n')[-1], "Helvetica-Bold", 9, CW - lw)
+    stem_h = len(q_lines) * 9 * 1.35 + 4 * mm
+
+    # Simple formats — use existing compact estimate
+    if fmt in ('tick_one', 'tick_two', 'true_false_table', 'find_and_copy', 'sequencing'):
+        return stem_h + estimate_height(c, q) + 5 * mm
+
+    if fmt == 'open_line' and marks == 1:
+        return stem_h + 15 * mm
+
+    answer = q.get('answer', '').strip()
+    award_lines = len(_ms_award_text(marks))
+
+    if fmt == 'reason_evidence_table':
+        rows = [r for r in answer.split('\n') if r.strip() and '|' in r]
+        body_h = (award_lines * 8 * 1.35
+                  + 10 * mm
+                  + len(rows) * 28 * mm
+                  + 8 * mm)
+    else:
+        alternatives = [a.strip() for a in answer.replace('\n', '/').split('/') if a.strip()]
+        n = max(len(alternatives), 1)
+        body_h = (award_lines * 8 * 1.35
+                  + 10 * mm
+                  + n * 8 * 1.35 * 1.8
+                  + 8 * mm)
+
+    return stem_h + body_h + 10 * mm
+
+
+def render_ms_question(c, q, y):
+    """
+    Render one question for the mark scheme PDF.
+    Simple formats use compact answer renderers.
+    Complex / open formats use flowing renderers.
+    Returns new y, or None if question does not fit on this page.
+    """
+    if y - estimate_ms_height(c, q) < MIN_Y:
+        return None
+
+    y, _ = draw_preamble(c, q, y)
+    marks_label(c, q.get('marks', 1), y + 9 * 1.35)
+
+    fmt   = q.get('format', 'open_line')
+    marks = q.get('marks', 1)
+
+    # Simple formats — compact renderers are correct as-is
+    if fmt == 'tick_one':
+        return render_tick_one_answer(c, q, y) - 3 * mm
+    if fmt == 'tick_two':
+        return render_tick_two_answer(c, q, y) - 3 * mm
+    if fmt == 'true_false_table':
+        return render_true_false_table_answer(c, q, y) - 3 * mm
+    if fmt == 'find_and_copy':
+        return render_find_and_copy_answer(c, q, y) - 3 * mm
+    if fmt == 'sequencing':
+        return render_sequencing_answer(c, q, y) - 3 * mm
+    if fmt == 'open_line' and marks == 1:
+        return render_open_line_answer(c, q, y) - 3 * mm
+
+    # Complex / open formats — flowing, unconstrained
+    if fmt == 'reason_evidence_table':
+        return render_ms_reason_evidence_flowing(c, q, y)
+    return render_ms_open_flowing(c, q, y)
+
+
+# ===========================================================================
+# Single question renderer — pupil / answer sheets (dispatches by format)
 # ===========================================================================
 
 def render_question(c, q, y, is_answer, is_supported):
-    """
-    Render one question at position y.
-    Returns new y below question, or None if estimated height exceeds remaining space.
-    """
     if y - estimate_height(c, q) < MIN_Y:
         return None
 
     y, _ = draw_preamble(c, q, y)
-    marks_label(c, q.get('marks', 1), y + 9 * 1.35)  # align to question text top
+    marks_label(c, q.get('marks', 1), y + 9 * 1.35)
 
     fmt = q.get('format', 'open_line')
 
@@ -843,9 +1010,7 @@ def render_question(c, q, y, is_answer, is_supported):
 
     renderer = dispatch.get(fmt)
     if renderer is None:
-        # Unknown format — fall back to open lines
         return render_open_line_pupil(c, q, y, is_supported) - 3 * mm
-
     return renderer() - 3 * mm
 
 
@@ -854,7 +1019,6 @@ def render_question(c, q, y, is_answer, is_supported):
 # ===========================================================================
 
 def build_page(path, lesson, text, questions, is_answer, is_supported, icon_path):
-    """Build a single A4 PDF page for one lesson version."""
     c = rl_canvas.Canvas(path, pagesize=A4)
 
     lesson_type = lesson['lesson_type'].capitalize()
@@ -869,7 +1033,6 @@ def build_page(path, lesson, text, questions, is_answer, is_supported, icon_path
     for q in questions:
         result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
         if result is None:
-            # No room — silently drop remaining questions (Q7 / Q5)
             break
         y = result
 
@@ -890,18 +1053,10 @@ def merge_pdfs(paths, out_path):
 
 
 # ===========================================================================
-# Main entry point
-# ===========================================================================
-
-# ===========================================================================
 # Text booklet page (SATs layout)
 # ===========================================================================
 
 def build_text_booklet_page(path, lesson, icon_path):
-    """
-    Build a text-only page for SATs-style output.
-    Full-width reading extract at large font, no questions.
-    """
     c = rl_canvas.Canvas(path, pagesize=A4)
 
     lesson_type = lesson["lesson_type"].capitalize()
@@ -914,7 +1069,6 @@ def build_text_booklet_page(path, lesson, icon_path):
 
     text = lesson.get("text", "")
     if text:
-        # Larger font for text booklet — easier reading
         lines = wrap_text(c, text, "Helvetica", 11, CW - 6 * mm)
         lh = 11 * 1.5
         box_h = len(lines) * lh + 8 * mm
@@ -936,19 +1090,6 @@ def build_text_booklet_page(path, lesson, icon_path):
 
 def build_pdfs(content: dict, icon_path: str, output_dir: str,
                layout: str = "integrated") -> dict:
-    """
-    Build PDFs from content_generator output.
-
-    content    : dict returned by content_generator.generate_content()
-    icon_path  : path to the reader icon PNG/WebP
-    output_dir : directory to write final PDFs
-    layout     : "integrated" (text + questions on same page, default)
-                 "sats" (separate text booklet PDF, questions-only PDFs)
-
-    Returns dict with keys:
-      standard, supported, answers          — always present
-      text_booklet                          — only when layout="sats"
-    """
     import tempfile, shutil
 
     tmp = tempfile.mkdtemp()
@@ -966,12 +1107,10 @@ def build_pdfs(content: dict, icon_path: str, output_dir: str,
         text = lesson.get('text', '')
 
         if layout == 'sats':
-            # Text booklet page — text only, no questions
             tp = os.path.join(tmp, f"{lt}_text.pdf")
             build_text_booklet_page(tp, lesson, icon_path)
             txt_pages.append(tp)
 
-            # Question pages — no text box
             p = os.path.join(tmp, f"{lt}_std.pdf")
             build_page(p, lesson, '', std_qs, is_answer=False,
                        is_supported=False, icon_path=icon_path)
@@ -997,7 +1136,6 @@ def build_pdfs(content: dict, icon_path: str, output_dir: str,
             ans_pages.extend([p, p2])
 
         else:
-            # Integrated layout — existing behaviour
             p = os.path.join(tmp, f"{lt}_std.pdf")
             build_page(p, lesson, text, std_qs, is_answer=False,
                        is_supported=False, icon_path=icon_path)
@@ -1051,10 +1189,6 @@ def build_pdfs(content: dict, icon_path: str, output_dir: str,
 # ===========================================================================
 
 def _parse_structured_text(text):
-    """
-    Parse text into list of (is_heading, content) tuples.
-    Headings are lines wrapped in **...**. Paragraphs separated by blank lines.
-    """
     segments = []
     for block in text.split('\n\n'):
         block = block.strip()
@@ -1069,30 +1203,23 @@ def _parse_structured_text(text):
 
 
 def draw_structured_text_box(c, text, y_top, font_size=10):
-    """
-    Draw reading text box with optional bold subheadings.
-    Handles **heading** markers. Returns y below box.
-    """
     segments = _parse_structured_text(text)
 
-    # Calculate total height
     lh_body = font_size * 1.42
     lh_head = font_size * 1.35
     gap = 2.5 * mm
-    total_h = 5 * mm  # top + bottom padding
+    total_h = 5 * mm
     for is_heading, content in segments:
         font = "Helvetica-Bold" if is_heading else "Helvetica"
         lh = lh_head if is_heading else lh_body
         lines = wrap_text(c, content, font, font_size, CW - 6 * mm)
         total_h += len(lines) * lh + gap
 
-    # Box
     c.setFillColorRGB(*BOX_BG)
     c.setStrokeColorRGB(*BOX_BORDER)
     c.setLineWidth(0.8)
     c.roundRect(MARGIN, y_top - total_h, CW, total_h, 2 * mm, fill=1, stroke=1)
 
-    # Text
     ty = y_top - 3.5 * mm
     c.setFillColorRGB(*DARK)
     for is_heading, content in segments:
@@ -1113,7 +1240,6 @@ def draw_structured_text_box(c, text, y_top, font_size=10):
 # ===========================================================================
 
 def _start_question_page(tmp_dir, prefix, page_num, header_kwargs, include_label):
-    """Create a new canvas for a question page. Returns (canvas, y, path)."""
     path = os.path.join(tmp_dir, f"{prefix}_p{page_num}.pdf")
     c = rl_canvas.Canvas(path, pagesize=A4)
     if include_label and page_num == 1:
@@ -1133,11 +1259,6 @@ def build_question_pages(
     is_answer, is_supported,
     icon_path, header_kwargs, include_label,
 ):
-    """
-    Render questions across one or more pages. Returns list of page paths.
-    header_kwargs: dict of keyword args for draw_header (lesson_type, day, date, key_q,
-                   i_can_statements, icon_path). Ignored when include_label=False.
-    """
     pages = []
     page_num = 1
     c, y, path = _start_question_page(
@@ -1147,7 +1268,6 @@ def build_question_pages(
     for q in questions:
         result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
         if result is None:
-            # Doesn't fit — save page, start new
             c.save()
             pages.append(path)
             page_num += 1
@@ -1156,7 +1276,7 @@ def build_question_pages(
             )
             result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
             if result is None:
-                result = y - 25 * mm  # force past it if question is pathologically tall
+                result = y - 25 * mm
         y = result
 
     c.save()
@@ -1169,12 +1289,9 @@ def build_question_pages(
 # ===========================================================================
 
 def _build_reading_paper_text_pages(tmp_dir, text, title, font_size=11):
-    """
-    Build text-only page(s) for a reading paper.
-    Flows segments across as many pages as needed. Returns list of page paths.
-    """
-    lh_body = font_size * 1.42
-    lh_head = font_size * 1.35
+    """Build text-only page(s). Returns list of page paths."""
+    lh_body  = font_size * 1.42
+    lh_head  = font_size * 1.35
     seg_gap  = 2.5 * mm
     padding  = 3.5 * mm
 
@@ -1188,12 +1305,13 @@ def _build_reading_paper_text_pages(tmp_dir, text, title, font_size=11):
         p = os.path.join(tmp_dir, f"rp_text_p{page_num}.pdf")
         c = rl_canvas.Canvas(p, pagesize=A4)
 
-        # ── Title block (first page only) ─────────────────────────────
         if page_num == 1 and title:
             y = H - MARGIN - 2 * mm
+            # Paper title — "Reading Paper: [topic]"
+            paper_title = f"Reading Paper: {title}"
             c.setFont("Helvetica-Bold", 12)
             c.setFillColorRGB(*BOX_BORDER)
-            for line in wrap_text(c, title, "Helvetica-Bold", 12, CW):
+            for line in wrap_text(c, paper_title, "Helvetica-Bold", 12, CW):
                 c.drawString(MARGIN, y, line)
                 y -= 12 * 1.4
             y -= 3 * mm
@@ -1207,26 +1325,24 @@ def _build_reading_paper_text_pages(tmp_dir, text, title, font_size=11):
 
         box_bottom = MARGIN
 
-        # ── Draw box background for this page ─────────────────────────
         c.setFillColorRGB(*BOX_BG)
         c.setStrokeColorRGB(*BOX_BORDER)
         c.setLineWidth(0.8)
         c.roundRect(MARGIN, box_bottom, CW, box_top - box_bottom,
                     2 * mm, fill=1, stroke=1)
 
-        # ── Render segments that fit on this page ──────────────────────
         ty = box_top - padding
         c.setFillColorRGB(*DARK)
 
         while seg_idx < len(segments):
             is_heading, content = segments[seg_idx]
-            font = "Helvetica-Bold" if is_heading else "Helvetica"
-            lh   = lh_head if is_heading else lh_body
+            font  = "Helvetica-Bold" if is_heading else "Helvetica"
+            lh    = lh_head if is_heading else lh_body
             lines = wrap_text(c, content, font, font_size, CW - 6 * mm)
             seg_h = len(lines) * lh + seg_gap
 
             if ty - seg_h < box_bottom + padding:
-                break  # this segment goes on the next page
+                break
 
             c.setFont(font, font_size)
             for line in lines:
@@ -1256,16 +1372,18 @@ def build_reading_paper_pdfs(
     import tempfile, shutil
 
     tmp = tempfile.mkdtemp()
-    key_q = content.get("key_question", "") or content.get("topic", "")
-    text = content.get("standard_text", "")
+    topic    = content.get("key_question", "") or content.get("topic", "")
+    text     = content.get("standard_text", "")
     questions = content.get("questions", [])
 
-    # ── Text page(s) ──────────────────────────────────────────────────────
-    txt_pages = _build_reading_paper_text_pages(tmp, text, key_q)
+    # Shared title string used on both PDFs to link them
+    paper_title = f"Reading Paper: {topic}" if topic else "Reading Paper"
+    ms_title    = f"Mark Scheme: {topic}"   if topic else "Mark Scheme"
 
-    # ── Learning label header for questions page ───────────────────────────
-    # For reading paper mode the label is the custom_label (user-set)
-    # We build a minimal header: just the label text and key question
+    # ── Text page(s) ──────────────────────────────────────────────────────
+    txt_pages = _build_reading_paper_text_pages(tmp, text, topic)
+
+    # ── Optional learning label renderer ──────────────────────────────────
     if include_label and custom_label.strip():
         def _draw_rp_label(c):
             y = H - MARGIN
@@ -1275,8 +1393,8 @@ def build_reading_paper_pdfs(
             y -= 7 * mm
             c.setFont("Helvetica-Bold", 10)
             c.setFillColorRGB(*BOX_BORDER)
-            c.drawString(MARGIN, y - 4 * mm, key_q)
-            kq_w = c.stringWidth(key_q, "Helvetica-Bold", 10)
+            c.drawString(MARGIN, y - 4 * mm, topic)
+            kq_w = c.stringWidth(topic, "Helvetica-Bold", 10)
             c.setLineWidth(0.5)
             c.setStrokeColorRGB(*BOX_BORDER)
             c.line(MARGIN, y - 5 * mm, MARGIN + kq_w, y - 5 * mm)
@@ -1290,7 +1408,7 @@ def build_reading_paper_pdfs(
         _draw_rp_label = None
 
     # ── Question pages ─────────────────────────────────────────────────────
-    q_pages = []
+    q_pages  = []
     page_num = 0
 
     def new_q_page(is_first):
@@ -1298,24 +1416,32 @@ def build_reading_paper_pdfs(
         page_num += 1
         p = os.path.join(tmp, f"rp_q_p{page_num}.pdf")
         c = rl_canvas.Canvas(p, pagesize=A4)
+
         if is_first:
-            # Name space — top right
-            name_y = H - MARGIN - 3 * mm
+            y = H - MARGIN - 2 * mm
+            # Paper title — left
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColorRGB(*BOX_BORDER)
+            c.drawString(MARGIN, y, paper_title)
+            # Name space — right, same line
             c.setFont("Helvetica", 9)
             c.setFillColorRGB(*DARK)
-            name_line = "Name:  ___________________________________"
-            c.drawRightString(MARGIN + CW, name_y, name_line)
+            c.drawRightString(MARGIN + CW, y, "Name:  ___________________________________")
+            y -= 11 * 1.4 + 3 * mm
+            c.setStrokeColorRGB(*GREY_LINE)
+            c.setLineWidth(0.4)
+            c.line(MARGIN, y, MARGIN + CW, y)
+            y -= 4 * mm
 
             if _draw_rp_label:
                 y = _draw_rp_label(c)
-            else:
-                y = H - MARGIN - 14 * mm  # clear of name line
         else:
             y = H - MARGIN - 4 * mm
             c.setFont("Helvetica-Oblique", 7.5)
             c.setFillColorRGB(0.5, 0.5, 0.5)
-            c.drawRightString(MARGIN + CW, y + 1 * mm, "continued…")
+            c.drawRightString(MARGIN + CW, y + 1 * mm, f"{paper_title} — continued…")
             y -= 5 * mm
+
         return c, y, p
 
     c, y, path = new_q_page(is_first=True)
@@ -1335,7 +1461,7 @@ def build_reading_paper_pdfs(
     q_pages.append(path)
 
     # ── Mark scheme pages ──────────────────────────────────────────────────
-    ms_pages = []
+    ms_pages   = []
     page_num_ms = 0
 
     def new_ms_page(is_first):
@@ -1344,31 +1470,40 @@ def build_reading_paper_pdfs(
         p = os.path.join(tmp, f"rp_ms_p{page_num_ms}.pdf")
         c = rl_canvas.Canvas(p, pagesize=A4)
         y = H - MARGIN - 2 * mm
+
         if is_first:
+            # Mark scheme title — links to paper_title
             c.setFont("Helvetica-Bold", 11)
             c.setFillColorRGB(*BOX_BORDER)
-            c.drawString(MARGIN, y, "Mark Scheme")
-            y -= 11 * 1.4 + 3 * mm
+            c.drawString(MARGIN, y, ms_title)
+            y -= 11 * 1.4
+            # Subtitle: "for Reading Paper: [topic]"
+            c.setFont("Helvetica", 8.5)
+            c.setFillColorRGB(0.4, 0.4, 0.4)
+            c.drawString(MARGIN, y, f"for {paper_title}")
+            y -= 8.5 * 1.4 + 2 * mm
             c.setStrokeColorRGB(*GREY_LINE)
             c.setLineWidth(0.5)
             c.line(MARGIN, y, MARGIN + CW, y)
-            y -= 4 * mm
+            y -= 5 * mm
         else:
             c.setFont("Helvetica-Oblique", 7.5)
             c.setFillColorRGB(0.5, 0.5, 0.5)
-            c.drawRightString(MARGIN + CW, y + 1 * mm, "Mark Scheme continued…")
+            c.drawRightString(MARGIN + CW, y + 1 * mm, f"{ms_title} — continued…")
             y -= 5 * mm
+
         return c, y, p
 
     c, y, path = new_ms_page(is_first=True)
 
     for q in questions:
-        result = render_question(c, q, y, is_answer=True, is_supported=False)
+        # Use render_ms_question — flowing for complex formats
+        result = render_ms_question(c, q, y)
         if result is None:
             c.save()
             ms_pages.append(path)
             c, y, path = new_ms_page(is_first=False)
-            result = render_question(c, q, y, is_answer=True, is_supported=False)
+            result = render_ms_question(c, q, y)
             if result is None:
                 result = y - 25 * mm
         y = result
