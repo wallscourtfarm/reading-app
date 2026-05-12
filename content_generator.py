@@ -520,6 +520,17 @@ def _call_api(system_prompt, user_prompt, max_tokens=8000):
         raise ValueError(f"Claude returned invalid JSON: {e}\n\nRaw:\n{raw[:600]}")
 
 
+def _call_api_text(system_prompt, user_prompt, max_tokens=1200):
+    """Like _call_api but returns plain text, not parsed JSON."""
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    return response.content[0].text.strip()
+
+
 VALID_FORMATS = {
     "open_line", "find_and_copy", "numbered_list", "tick_one", "tick_two",
     "true_false_table", "sequencing", "reason_evidence_table", "two_part_ab",
@@ -1114,4 +1125,253 @@ def generate_ks1_paper(
         "passage1": p1,
         "passage2": p2,
         "year_group": year_group,
+    }
+
+
+# ===========================================================================
+# DECODABLE READER — phonics-constrained text generation (Reception – Y1)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# GPC and CEW data — Unlocking Letters and Sounds progression
+# ---------------------------------------------------------------------------
+
+_P2_GPCS = {
+    's','a','t','p','i','n','m','d','g','o','c','k','ck','e','u',
+    'r','h','b','f','ff','l','ll','ss',
+}
+_P3_NEW_GPCS = {
+    'j','v','w','x','y','z','zz','qu',
+    'ch','sh','th','ng',
+    'ai','ee','igh','oa','oo','ar','or','ur',
+    'ow','oi','ear','air','ure','er',
+}
+_P5A_NEW_GPCS = {
+    'ay','ou','ie','ea','oy','ir','ue','aw','wh','ph','ew','oe','au','ey',
+    'a-e','e-e','i-e','o-e','u-e',
+}
+
+_P2_CEW  = {'the','to','into','no','i','go'}
+_P3_CEW  = _P2_CEW  | {'me','we','be','he','she','was','you','they','all','are','my','her'}
+_P4_CEW  = _P3_CEW  | {'said','have','like','so','do','some','come','were','there',
+                        'little','one','when','out','what'}
+_P5A_CEW = _P4_CEW  | {'oh','their','people','mr','mrs','looked','called'}
+
+_P4_GPCS = _P2_GPCS | _P3_NEW_GPCS   # Phase 4 adds no new GPCs
+
+PHASE_DATA = {
+    "Phase 2": {
+        "gpcs": _P2_GPCS,
+        "cew":  _P2_CEW,
+        "word_count": "30-45",
+        "stage_label": "Reception Autumn Term 1",
+        "generation_notes": (
+            "CVC words only (e.g. cat, sit, hop). No digraphs. "
+            "Very short sentences of 3-5 words. No long vowel sounds."
+        ),
+    },
+    "Phase 3": {
+        "gpcs": _P4_GPCS,
+        "cew":  _P3_CEW,
+        "word_count": "45-65",
+        "stage_label": "Reception Autumn Term 2 - Spring Term 2",
+        "generation_notes": (
+            "Can use digraphs (ch, sh, th, ng) and vowel digraphs "
+            "(ai, ee, igh, oa, oo, ar, or, ur, ow, oi, ear, air, ure, er). "
+            "Short sentences. No split digraphs."
+        ),
+    },
+    "Phase 4": {
+        "gpcs": _P4_GPCS,
+        "cew":  _P4_CEW,
+        "word_count": "55-75",
+        "stage_label": "Reception Summer Term 1 - Year 1 Autumn Term 1",
+        "generation_notes": (
+            "Adjacent consonants allowed: words like frog, best, jump, stamp. "
+            "More varied sentence structures. Still no split digraphs."
+        ),
+    },
+    "Phase 5a": {
+        "gpcs": _P4_GPCS | _P5A_NEW_GPCS,
+        "cew":  _P5A_CEW,
+        "word_count": "65-90",
+        "stage_label": "Year 1 Autumn Term 2 onwards",
+        "generation_notes": (
+            "Split digraphs now allowed (a-e as in cake, i-e as in time, "
+            "o-e as in bone, u-e as in tune, e-e as in theme). "
+            "Also: ay, ou, ie, ea, oy, ir, ue, aw, ew, oe, au, ey. "
+            "Wider vocabulary possible."
+        ),
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Programmatic phonics validator
+# ---------------------------------------------------------------------------
+
+def _vce_pattern(word):
+    """True if word has a VCe (split digraph) pattern."""
+    w = word.lower()
+    return (
+        len(w) >= 3
+        and w[-1] == 'e'
+        and w[-2] not in 'aeiou'
+        and any(c in 'aeiou' for c in w[:-2])
+    )
+
+
+def _segment_word(word_lower, sorted_gpcs):
+    """Greedy longest-match segmentation. Returns (success, graphemes)."""
+    pos = 0
+    graphemes = []
+    while pos < len(word_lower):
+        matched = False
+        for g in sorted_gpcs:
+            if word_lower[pos: pos + len(g)] == g:
+                graphemes.append(g)
+                pos += len(g)
+                matched = True
+                break
+        if not matched:
+            return False, []
+    return True, graphemes
+
+
+def validate_text_phonics(text, phase_key):
+    """
+    Check every word in text against the phonics constraints for phase_key.
+    Returns dict: {pass, flag_hard, flag_vce}
+    """
+    phase       = PHASE_DATA.get(phase_key, {})
+    allowed_gpcs = phase.get("gpcs", set())
+    allowed_cew  = phase.get("cew",  set())
+    is_phase5a   = (phase_key == "Phase 5a")
+    sorted_gpcs  = sorted(allowed_gpcs, key=len, reverse=True)
+
+    results = {"pass": [], "flag_hard": [], "flag_vce": []}
+    seen = set()
+
+    for raw in re.findall(r"[a-zA-Z']+", text):
+        word = raw.lower().strip("'")
+        if not word or word in seen:
+            continue
+        seen.add(word)
+
+        if word in allowed_cew:
+            results["pass"].append(raw)
+            continue
+
+        core = re.sub(r"'[a-z]+$", "", word)
+        ok, _ = _segment_word(core, sorted_gpcs)
+
+        if not ok:
+            results["flag_hard"].append(raw)
+        elif not is_phase5a and _vce_pattern(core):
+            results["flag_vce"].append(raw)
+        else:
+            results["pass"].append(raw)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Generation + QA
+# ---------------------------------------------------------------------------
+
+_DECODABLE_SYSTEM = (
+    "You are a specialist phonics reading-text writer for early years and KS1. "
+    "You write short, engaging texts using ONLY the grapheme-phoneme correspondences "
+    "and common exception words specified. Every single word must be decodable by a child "
+    "who knows only those GPCs, or must be a listed common exception word. "
+    "Return ONLY the text - no title, no labels, no markdown."
+)
+
+
+def _build_decodable_prompt(topic, phase_key, context=""):
+    phase  = PHASE_DATA[phase_key]
+    gpcs   = phase["gpcs"]
+    cew    = phase["cew"]
+    notes  = phase["generation_notes"]
+    wcount = phase["word_count"]
+
+    single  = sorted(g for g in gpcs if len(g) == 1)
+    digraph = sorted(g for g in gpcs if len(g) == 2)
+    longer  = sorted(g for g in gpcs if len(g) >= 3)
+    cew_str = "  ".join(sorted(cew))
+
+    context_line = f"\nCONTEXT: {context}" if context.strip() else ""
+
+    gpc_block = f"Single letters: {' '.join(single)}\nDigraphs: {' '.join(digraph)}"
+    if longer:
+        gpc_block += f"\nTrigraphs / split digraphs: {' '.join(longer)}"
+
+    return f"""PHONICS STAGE: {phase_key}
+TOPIC: {topic}{context_line}
+TARGET LENGTH: {wcount} words
+STAGE NOTES: {notes}
+
+ALLOWED GPCs:
+{gpc_block}
+
+ALLOWED CEW:
+{cew_str}
+
+RULES:
+1. Every word must be decodable using ONLY the listed GPCs, or be in the CEW list.
+2. No other words are permitted. If a word is not decodable at this stage, choose a different word.
+3. Do not use split digraphs unless they appear in the allowed GPCs above.
+4. Short, clear sentences. Simple, concrete language. No title - body text only.
+
+Write the text now:"""
+
+
+def _qa_decodable(text, phase_key):
+    """Fix non-decodable words. Returns corrected text or original on failure."""
+    phase = PHASE_DATA[phase_key]
+    gpcs  = sorted(phase["gpcs"], key=len, reverse=True)
+    cew   = sorted(phase["cew"])
+    prompt = (
+        f"This reading text was written for {phase_key} phonics level.\n\n"
+        f"TEXT:\n{text}\n\n"
+        f"ALLOWED GPCs: {' '.join(gpcs)}\n"
+        f"ALLOWED CEW: {' '.join(cew)}\n\n"
+        "Check every word. Replace any word that is not decodable by the allowed GPCs "
+        "and is not in the CEW list. Keep the topic and meaning as close as possible. "
+        "Return ONLY the corrected text."
+    )
+    try:
+        return _call_api_text(_DECODABLE_SYSTEM, prompt, max_tokens=1200)
+    except Exception:
+        return text
+
+
+def generate_decodable_text(topic, phase_key, context=""):
+    """
+    Generate a phonics-constrained decodable reading text.
+    Returns dict: {text, phase, stage_label, validation, qa_applied}
+    """
+    if phase_key not in PHASE_DATA:
+        raise ValueError(f"Unknown phase: {phase_key}")
+
+    text = _call_api_text(
+        _DECODABLE_SYSTEM,
+        _build_decodable_prompt(topic, phase_key, context),
+        max_tokens=1200,
+    )
+
+    validation = validate_text_phonics(text, phase_key)
+    qa_applied = False
+
+    if validation["flag_hard"]:
+        text = _qa_decodable(text, phase_key)
+        validation = validate_text_phonics(text, phase_key)
+        qa_applied = True
+
+    return {
+        "text":        text,
+        "phase":       phase_key,
+        "stage_label": PHASE_DATA[phase_key]["stage_label"],
+        "validation":  validation,
+        "qa_applied":  qa_applied,
     }

@@ -2058,3 +2058,159 @@ def build_ks1_paper1_pdfs(
 
     _shutil.rmtree(tmp)
     return {"combined": out_combined, "mark_scheme": out_ms}
+
+
+# ===========================================================================
+# Decodable Reader output builders
+# ===========================================================================
+
+def build_decodable_pdf(result: dict, output_dir: str) -> str:
+    """Build a clean A4 PDF for a decodable reading text."""
+    import tempfile as _tmpmod, shutil as _shutil
+
+    text        = result.get("text", "")
+    phase       = result.get("phase", "")
+    stage_label = result.get("stage_label", "")
+    validation  = result.get("validation", {})
+    flag_hard   = validation.get("flag_hard", [])
+    flag_vce    = validation.get("flag_vce", [])
+
+    set_year_group("Y1")
+
+    tmp = _tmpmod.mkdtemp()
+    p   = os.path.join(tmp, "dec_text.pdf")
+    c   = rl_canvas.Canvas(p, pagesize=A4)
+
+    band_h = 14 * mm
+    c.setFillColorRGB(*_ACCENT)
+    c.rect(0, H - band_h, W, band_h, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(MARGIN, H - band_h + 4 * mm, phase)
+    c.setFont("Helvetica", 9)
+    c.drawRightString(W - MARGIN, H - band_h + 4 * mm, stage_label)
+
+    y         = H - band_h - 10 * mm
+    font_size = 18
+    leading   = font_size * 1.5
+
+    c.setFont("Helvetica", font_size)
+    c.setFillColorRGB(*DARK)
+
+    paragraphs = [p2.strip() for p2 in text.split('\n') if p2.strip()]
+    for para in paragraphs:
+        lines = wrap_text(c, para, "Helvetica", font_size, CW)
+        for line in lines:
+            if y < MARGIN + leading:
+                c.showPage()
+                c.setFillColorRGB(*DARK)
+                c.setFont("Helvetica", font_size)
+                y = H - MARGIN - leading
+            c.drawString(MARGIN, y, line)
+            y -= leading
+        y -= leading * 0.4
+
+    if flag_hard or flag_vce:
+        y -= 4 * mm
+        c.setStrokeColorRGB(*GREY_LINE)
+        c.setLineWidth(0.4)
+        c.line(MARGIN, y, MARGIN + CW, y)
+        y -= 5 * mm
+        c.setFont("Helvetica-Bold", 8)
+        if flag_hard:
+            c.setFillColorRGB(0.65, 0.1, 0.1)
+            msg = f"Check these words (may be outside {phase} GPCs): {', '.join(flag_hard)}"
+            for ln in wrap_text(c, msg, "Helvetica-Bold", 8, CW):
+                c.drawString(MARGIN, y, ln)
+                y -= 8 * 1.35
+        if flag_vce:
+            c.setFillColorRGB(0.55, 0.35, 0.0)
+            msg = f"Possible split digraphs - check if intended at {phase}: {', '.join(flag_vce)}"
+            for ln in wrap_text(c, msg, "Helvetica-Bold", 8, CW):
+                c.drawString(MARGIN, y, ln)
+                y -= 8 * 1.35
+
+    c.save()
+    os.makedirs(output_dir, exist_ok=True)
+    out = os.path.join(output_dir, "Decodable_Text.pdf")
+    import shutil
+    shutil.copy(p, out)
+    _shutil.rmtree(tmp)
+    return out
+
+
+def build_decodable_pptx(result: dict, output_dir: str) -> str:
+    """Build a single-slide PPTX for displaying a decodable reading text."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    text        = result.get("text", "")
+    phase       = result.get("phase", "")
+    stage_label = result.get("stage_label", "")
+    validation  = result.get("validation", {})
+    flag_hard   = validation.get("flag_hard", [])
+    flag_vce    = validation.get("flag_vce",  [])
+
+    set_year_group("Y1")
+    r, g, b = [int(v * 255) for v in _ACCENT]
+    accent_rgb = RGBColor(r, g, b)
+
+    prs = Presentation()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    band_h = Inches(0.45)
+    band   = slide.shapes.add_shape(1, 0, 0, prs.slide_width, band_h)
+    band.fill.solid()
+    band.fill.fore_color.rgb = accent_rgb
+    band.line.fill.background()
+    tf = band.text_frame
+    tf.text = f"{phase}  -  {stage_label}"
+    tf.paragraphs[0].alignment = PP_ALIGN.LEFT
+    run = tf.paragraphs[0].runs[0]
+    run.font.size = Pt(14)
+    run.font.bold = True
+    run.font.color.rgb = RGBColor(255, 255, 255)
+
+    margin = Inches(0.55)
+    top    = band_h + Inches(0.3)
+    body_h = prs.slide_height - top - Inches(0.5)
+    txBox  = slide.shapes.add_textbox(margin, top, prs.slide_width - 2 * margin, body_h)
+    tf2    = txBox.text_frame
+    tf2.word_wrap = True
+
+    paragraphs = [p2.strip() for p2 in text.split('\n') if p2.strip()]
+    for i, para_text in enumerate(paragraphs):
+        p_obj = tf2.paragraphs[0] if i == 0 else tf2.add_paragraph()
+        p_obj.space_after  = Pt(8)
+        run = p_obj.add_run()
+        run.text = para_text
+        run.font.size  = Pt(28)
+        run.font.color.rgb = RGBColor(34, 34, 34)
+
+    if flag_hard or flag_vce:
+        note_top = prs.slide_height - Inches(0.65)
+        note_box = slide.shapes.add_textbox(
+            margin, note_top, prs.slide_width - 2 * margin, Inches(0.55)
+        )
+        nf   = note_box.text_frame
+        nf.word_wrap = True
+        parts = []
+        if flag_hard:
+            parts.append(f"Check: {', '.join(flag_hard)}")
+        if flag_vce:
+            parts.append(f"Split digraphs?: {', '.join(flag_vce)}")
+        nr = nf.paragraphs[0].add_run()
+        nr.text = "  |  ".join(parts)
+        nr.font.size   = Pt(10)
+        nr.font.italic = True
+        nr.font.color.rgb = RGBColor(160, 60, 60)
+
+    os.makedirs(output_dir, exist_ok=True)
+    out = os.path.join(output_dir, "Decodable_Text.pptx")
+    prs.save(out)
+    return out
