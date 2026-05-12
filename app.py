@@ -632,15 +632,18 @@ with tab_dec:
             week_ref  = date.today().strftime("%d%b").upper()
             phase_tag = dec_phase.replace(" ", "")
             pdf_path  = build_decodable_pdf(result, tmp)
-            pptx_path = build_decodable_pptx(result, tmp)
             st.session_state.dec_dl.append((
                 "📄 Text PDF", _read_bytes(pdf_path),
                 PDF_MIME, f"Decodable_{phase_tag}_{week_ref}.pdf",
             ))
-            st.session_state.dec_dl.append((
-                "📊 Display Slide", _read_bytes(pptx_path),
-                PPTX_MIME, f"Decodable_{phase_tag}_{week_ref}.pptx",
-            ))
+            try:
+                pptx_path = build_decodable_pptx(result, tmp)
+                st.session_state.dec_dl.append((
+                    "📊 Display Slide", _read_bytes(pptx_path),
+                    PPTX_MIME, f"Decodable_{phase_tag}_{week_ref}.pptx",
+                ))
+            except Exception:
+                st.warning("PPTX output unavailable — python-pptx not installed.")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
