@@ -191,10 +191,10 @@ if is_ks1:
     st.info("KS1 Reading Paper mode — generating both passages and mark scheme.")
     ks1_paper_type = st.radio(
         "Paper type",
-        ["Separate text + questions (Paper 2)", "Combined text and questions (Paper 1)"],
+        ["Combined text and questions (Paper 1)", "Separate text + questions (Paper 2)"],
         horizontal=True,
     )
-    ks1_paper_type_key = "separate" if "Separate" in ks1_paper_type else "combined"
+    ks1_paper_type_key = "combined" if "Combined" in ks1_paper_type else "separate"
 else:
     mode = st.radio(
         "mode", ["Lesson Mode", "Reading Paper Mode"],

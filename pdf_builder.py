@@ -1983,13 +1983,18 @@ def build_ks1_paper1_pdfs(
 
         c, y, path = new_page(is_first=True)
 
-        for passage in [p1, p2]:
+        for passage_idx, passage in enumerate([p1, p2]):
             ptitle = passage.get("title", "")
             ptype  = passage.get("text_type", "")
             type_label = {"fiction": "Fiction", "non_fiction": "Non-fiction",
                           "poetry": "Poetry"}.get(ptype, "")
 
-            if y < MARGIN + 50 * mm:
+            # Force a new page before passage 2 — always
+            if passage_idx == 1:
+                c.save()
+                pages_out.append(path)
+                c, y, path = new_page(is_first=False)
+            elif y < MARGIN + 50 * mm:
                 c.save()
                 pages_out.append(path)
                 c, y, path = new_page(is_first=False)
@@ -2000,11 +2005,8 @@ def build_ks1_paper1_pdfs(
                 chunk = section.get("text_chunk", "")
                 qs    = section.get("questions", [])
 
-                # Estimate space needed for this section
-                chunk_h = draw_text_box(c, chunk, y_top=y, font_size=10) if False else 0
-                # Just check if we need a new page (rough estimate)
-                rough_h = len(chunk.split()) * 1.4 + len(qs) * 25 * mm
-                if rough_h > 200 * mm and y < MARGIN + 60 * mm:
+                # Rough check: if remaining space is under 80mm, start a new page
+                if y < MARGIN + 80 * mm:
                     c.save()
                     pages_out.append(path)
                     c, y, path = new_page(is_first=False)
