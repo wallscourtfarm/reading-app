@@ -758,13 +758,42 @@ def estimate_height(c, q):
 # Mark scheme — flowing renderers
 # ===========================================================================
 
-def _ms_award_text(marks):
-    """Return list of award criteria lines for a given mark value."""
+def _ms_award_text(marks, fmt='open_line', n_items=None):
+    """
+    Return format-specific award criteria lines matching SATs mark scheme conventions.
+    n_items: number of statements/items in the format (for true_false_table).
+    """
+    n = n_items or 0
+
+    if fmt == 'tick_one':
+        return ["Award 1 mark for the correct answer."]
+
+    if fmt == 'tick_two':
+        return ["Award 1 mark for both correct answers."]
+
+    if fmt == 'find_and_copy':
+        return ["Award 1 mark for the correct word or phrase."]
+
+    if fmt == 'sequencing':
+        return ["Award 1 mark for the complete correct sequence."]
+
+    if fmt == 'true_false_table':
+        if marks <= 1:
+            return ([f"Award 1 mark for all {n} correct."] if n
+                    else ["Award 1 mark for all correct."])
+        else:
+            return ([f"Award 1 mark for {n - 1} correct or 2 marks for all {n} correct."] if n
+                    else ["Award 1 mark for all but one correct or 2 marks for all correct."])
+
+    if fmt == 'two_part_ab':
+        return ["Award 1 mark per part (up to 2 marks)."]
+
+    # open_line, numbered_list, reason_evidence_table
     if marks == 1:
         return ["Award 1 mark for an acceptable answer."]
-    elif marks == 2:
-        return ["Award 1 mark per acceptable point (up to 2 marks)."]
-    elif marks == 3:
+    if marks == 2:
+        return ["Award 1 mark per acceptable point, up to a maximum of 2 marks."]
+    if marks == 3:
         return [
             "Award 3 marks for two acceptable points, at least one with evidence.",
             "Award 2 marks for two acceptable points or one point with evidence.",
@@ -773,19 +802,29 @@ def _ms_award_text(marks):
     return [f"Award up to {marks} marks."]
 
 
-def render_ms_open_flowing(c, q, y):
-    """Flowing mark scheme for open_line (2–3 marks), numbered_list, two_part_ab."""
-    answer = q.get('answer', '').strip()
+def _draw_ms_award_header(c, q, y):
+    """
+    Draw award criteria line(s) in small italic grey above the answer.
+    Called from render_ms_question() before every renderer.
+    Returns new y.
+    """
+    fmt    = q.get('format', 'open_line')
     marks  = q.get('marks', 1)
+    fd     = q.get('format_data', {})
+    n_items = len(fd.get('statements', [])) if fmt == 'true_false_table' else None
 
-    # Award criteria lines
     c.setFont("Helvetica-Oblique", 8)
     c.setFillColorRGB(0.3, 0.3, 0.3)
-    for line in _ms_award_text(marks):
+    for line in _ms_award_text(marks, fmt, n_items):
         for wrapped in wrap_text(c, line, "Helvetica-Oblique", 8, CW):
             c.drawString(MARGIN, y - 3.5 * mm, wrapped)
             y -= 8 * 1.35
-    y -= 2 * mm
+    return y - 2 * mm
+
+
+def render_ms_open_flowing(c, q, y):
+    """Flowing mark scheme for open_line (2–3 marks), numbered_list, two_part_ab."""
+    answer = q.get('answer', '').strip()
 
     # "Accept:" header
     c.setFont("Helvetica-Bold", 8.5)
@@ -833,16 +872,6 @@ def render_ms_open_flowing(c, q, y):
 def render_ms_reason_evidence_flowing(c, q, y):
     """Flowing mark scheme for reason_evidence_table questions."""
     answer = q.get('answer', '').strip()
-    marks  = q.get('marks', 3)
-
-    # Award criteria
-    c.setFont("Helvetica-Oblique", 8)
-    c.setFillColorRGB(0.3, 0.3, 0.3)
-    for line in _ms_award_text(marks):
-        for wrapped in wrap_text(c, line, "Helvetica-Oblique", 8, CW):
-            c.drawString(MARGIN, y - 3.5 * mm, wrapped)
-            y -= 8 * 1.35
-    y -= 2 * mm
 
     # Parse "reason | evidence" rows
     rows = []
@@ -899,39 +928,38 @@ def render_ms_reason_evidence_flowing(c, q, y):
 
 def estimate_ms_height(c, q):
     """Estimate mark scheme height. More generous than pupil estimate."""
-    fmt   = q.get('format', 'open_line')
-    marks = q.get('marks', 1)
+    fmt    = q.get('format', 'open_line')
+    marks  = q.get('marks', 1)
+    fd     = q.get('format_data', {})
+    n_items = len(fd.get('statements', [])) if fmt == 'true_false_table' else None
 
     qtext = q.get('question', '')
     lw = c.stringWidth(f"{q['number']}. ", "Helvetica-Bold", 9)
     q_lines = wrap_text(c, qtext.split('\n\n')[-1], "Helvetica-Bold", 9, CW - lw)
     stem_h = len(q_lines) * 9 * 1.35 + 4 * mm
 
-    # Simple formats — use existing compact estimate
+    # Award header height — present for every question type
+    award_lines = len(_ms_award_text(marks, fmt, n_items))
+    award_h = award_lines * 8 * 1.35 + 2 * mm
+
+    # Simple formats — compact body + award header
     if fmt in ('tick_one', 'tick_two', 'true_false_table', 'find_and_copy', 'sequencing'):
-        return stem_h + estimate_height(c, q) + 5 * mm
+        return stem_h + award_h + estimate_height(c, q) + 5 * mm
 
     if fmt == 'open_line' and marks == 1:
-        return stem_h + 15 * mm
+        return stem_h + award_h + 15 * mm
 
     answer = q.get('answer', '').strip()
-    award_lines = len(_ms_award_text(marks))
 
     if fmt == 'reason_evidence_table':
         rows = [r for r in answer.split('\n') if r.strip() and '|' in r]
-        body_h = (award_lines * 8 * 1.35
-                  + 10 * mm
-                  + len(rows) * 28 * mm
-                  + 8 * mm)
+        body_h = 10 * mm + len(rows) * 28 * mm + 8 * mm
     else:
         alternatives = [a.strip() for a in answer.replace('\n', '/').split('/') if a.strip()]
         n = max(len(alternatives), 1)
-        body_h = (award_lines * 8 * 1.35
-                  + 10 * mm
-                  + n * 8 * 1.35 * 1.8
-                  + 8 * mm)
+        body_h = 10 * mm + n * 8 * 1.35 * 1.8 + 8 * mm
 
-    return stem_h + body_h + 10 * mm
+    return stem_h + award_h + body_h + 10 * mm
 
 
 def render_ms_question(c, q, y):
@@ -947,10 +975,13 @@ def render_ms_question(c, q, y):
     y, _ = draw_preamble(c, q, y)
     marks_label(c, q.get('marks', 1), y + 9 * 1.35)
 
+    # Award criteria — drawn for every question type
+    y = _draw_ms_award_header(c, q, y)
+
     fmt   = q.get('format', 'open_line')
     marks = q.get('marks', 1)
 
-    # Simple formats — compact renderers are correct as-is
+    # Simple formats — compact renderers
     if fmt == 'tick_one':
         return render_tick_one_answer(c, q, y) - 3 * mm
     if fmt == 'tick_two':
