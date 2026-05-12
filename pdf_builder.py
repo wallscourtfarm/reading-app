@@ -644,6 +644,8 @@ def render_sequencing_answer(c, q, y):
 
 
 def render_reason_evidence_answer(c, q, y):
+    import re as _re
+
     fd = q['format_data']
     example = fd.get('example', {})
     blank_rows = fd.get('rows', 2)
@@ -651,7 +653,17 @@ def render_reason_evidence_answer(c, q, y):
     col_r = CW * 0.42
     col_e = CW - col_r
     header_h = 6 * mm
-    row_h = 11 * mm
+    row_h = 13 * mm   # slightly taller rows for mark scheme — multiple alternatives may wrap
+
+    # Parse "reason | evidence" rows from answer field
+    ans_pairs = []
+    for raw in answer.strip().split('\n'):
+        raw = raw.strip()
+        if '|' in raw:
+            r, e = raw.split('|', 1)
+            ans_pairs.append((r.strip(), e.strip()))
+    while len(ans_pairs) < blank_rows:
+        ans_pairs.append(('', ''))
 
     # Header
     c.setFillColorRGB(*BOX_BORDER)
@@ -663,7 +675,7 @@ def render_reason_evidence_answer(c, q, y):
     c.drawCentredString(MARGIN + col_r + col_e / 2, y - header_h + 2 * mm, "Evidence")
     y -= header_h
 
-    # Example row
+    # Example row (shaded — pre-filled on pupil paper)
     c.setFillColorRGB(*LIGHT_GREY)
     c.setStrokeColorRGB(*GREY_LINE)
     c.setLineWidth(0.4)
@@ -681,35 +693,41 @@ def render_reason_evidence_answer(c, q, y):
         ry -= 8 * 1.3
     y -= row_h
 
-    # Answer rows in green
-    import re as _re
-    # Try to split answer into reason/evidence pairs
-    ans_pairs = []
-    raw_parts = _re.split(r'\n', answer.strip())
-    for rp in raw_parts:
-        if '|' in rp:
-            r, e = rp.split('|', 1)
-            ans_pairs.append((r.strip(), e.strip()))
-    while len(ans_pairs) < blank_rows:
-        ans_pairs.append(('', ''))
-
+    # Mark scheme rows — green, with alternatives separated by " / "
     for i in range(blank_rows):
         c.setFillColorRGB(*TICK_CELL)
         c.setStrokeColorRGB(*GREY_LINE)
         c.setLineWidth(0.4)
         c.rect(MARGIN, y - row_h, col_r, row_h, fill=1, stroke=1)
         c.rect(MARGIN + col_r, y - row_h, col_e, row_h, fill=1, stroke=1)
-        if i < len(ans_pairs) and ans_pairs[i][0]:
+
+        reason_text = ans_pairs[i][0] if i < len(ans_pairs) else ''
+        evid_text   = ans_pairs[i][1] if i < len(ans_pairs) else ''
+
+        if reason_text or evid_text:
             c.setFillColorRGB(*GREEN)
             c.setFont("Helvetica-Oblique", 8)
+
+            # Reason cell
             ry = y - 3 * mm
-            for line in wrap_text(c, ans_pairs[i][0], "Helvetica-Oblique", 8, col_r - 4 * mm):
+            # If "/" alternatives, show "Accept:" prefix on first line
+            r_lines = wrap_text(c, reason_text, "Helvetica-Oblique", 8, col_r - 4 * mm)
+            for line in r_lines:
                 c.drawString(MARGIN + 2 * mm, ry, line)
                 ry -= 8 * 1.3
+
+            # Evidence cell
             ry = y - 3 * mm
-            for line in wrap_text(c, ans_pairs[i][1], "Helvetica-Oblique", 8, col_e - 4 * mm):
+            e_lines = wrap_text(c, evid_text, "Helvetica-Oblique", 8, col_e - 4 * mm)
+            for line in e_lines:
                 c.drawString(MARGIN + col_r + 2 * mm, ry, line)
                 ry -= 8 * 1.3
+        else:
+            # No answer — show placeholder
+            c.setFillColorRGB(0.7, 0.7, 0.7)
+            c.setFont("Helvetica-Oblique", 7.5)
+            c.drawString(MARGIN + 2 * mm, y - row_h + 3 * mm, "See mark scheme")
+
         y -= row_h
 
     return y - 2 * mm

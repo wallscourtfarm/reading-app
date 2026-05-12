@@ -79,6 +79,12 @@ sequencing         Small numbered boxes beside shuffled events/steps.
 reason_evidence_table  Two-column table (Reason | Evidence). One example row pre-filled.
                    format_data: { "example":{"reason":"...","evidence":"..."}, "rows": 2 }
                    Always 2 blank rows. 3 marks total.
+                   ANSWER FIELD FORMAT (mandatory): provide mark scheme for both blank rows as:
+                   "reason1 | evidence1\nreason2 | evidence2"
+                   Each row should give the primary acceptable answer. If multiple phrasings
+                   are acceptable, separate them with " / " within the cell:
+                   "He was brave / He showed courage | He fought the street cats / He stood his ground"
+                   The answer field must always contain exactly 2 rows separated by \n.
 
 two_part_ab        Two sub-questions (a) and (b), each worth 1 mark.
                    format_data: { "parts":[{"label":"a","question":"...","answer":"..."},
