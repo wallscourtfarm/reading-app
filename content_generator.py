@@ -21,6 +21,66 @@ WORD_COUNTS = {
     "long":     "700–800",
 }
 
+YG_TEXT_GUIDANCE = {
+    "Y4": (
+        "Age 8–9. Accessible prose with Tier 2 vocabulary embedded naturally. "
+        "Sentences varied but clear. Y3/4 CEW list. Inference requires reading between "
+        "the lines; author viewpoint accessible. Non-fiction may use subheadings for "
+        "long texts."
+    ),
+    "Y5": (
+        "Age 9–10. More ambitious prose with Tier 2 and some Tier 3 vocabulary. "
+        "Complex sentence structures and figurative language used where appropriate. "
+        "Y5/6 CEW list begins. Multiple layers of meaning in fiction. Non-fiction may "
+        "use cross-references, index-style organisation or embedded data."
+    ),
+    "Y6": (
+        "Age 10–11. Challenging prose with full Y5/6 CEW vocabulary. May include irony, "
+        "ambiguity, unreliable narrators or complex structural choices. Texts can have "
+        "multiple layers of meaning. Fiction may use shifts in perspective or time. "
+        "Non-fiction may include persuasion, bias or evaluative stance."
+    ),
+}
+
+YG_QUESTION_GUIDANCE = {
+    "Y4": (
+        "Full 2a–2h content domain at Y4 level. Balance retrieval, vocabulary and "
+        "inference. Inference: unstated meaning, author viewpoint. Vocabulary: "
+        "connotation, word families, Tier 2 in context."
+    ),
+    "Y5": (
+        "Full 2a–2h at Y5 level. Increase weighting of inference and author craft. "
+        "Inference: figurative language, between-the-lines meaning, author intent. "
+        "Author craft (2f): analyse specific language and structure choices for effect. "
+        "Retrieval: multiple steps, using glossary or cross-reference."
+    ),
+    "Y6": (
+        "Full 2a–2h at Y6 level with sustained analytical depth. Strong weighting to "
+        "inference, language effect and comparison. Questions may target irony, "
+        "ambiguity, unreliable narrators. Use SATs-style question stems for analysis "
+        "questions. reason_evidence_table and multi-mark open_line questions more "
+        "frequent. Summary (2c): condense extended passages."
+    ),
+}
+
+YG_SUPPORTED_GUIDANCE = {
+    "Y4": (
+        "Supported version pitched at Year 1/2 reading level: shorter sentences, "
+        "simpler synonyms substituted for harder words, generous scaffolding and "
+        "sentence starters throughout."
+    ),
+    "Y5": (
+        "Supported version pitched at Year 3 reading level: simplified but not "
+        "babyish; sentence frames provided; key vocabulary glossed inline; "
+        "scaffolding supports structure without over-simplifying the thinking."
+    ),
+    "Y6": (
+        "Supported version pitched at Year 4 reading level: still cognitively "
+        "demanding; vocabulary support and structured sentence frames provided; "
+        "inference scaffolded with evidence prompts."
+    ),
+}
+
 # Cognitive question types
 QUESTION_TYPES = {
     "Retrieval":               "retrieval",
@@ -197,6 +257,7 @@ OUTPUT: Valid JSON only — no preamble, no markdown fences.
   "lessons": [
     {{
       "lesson_type": "vocabulary",
+      "learning_focus": "To explore and explain the meaning of new vocabulary in context",
       "day": "...",
       "date": "...",
       "i_can_statements": ["...", "..."],
@@ -247,13 +308,18 @@ def _layout_restriction(question_layouts):
 
 def _build_lesson_prompt(
     topic, key_question,
-    vocab_day, vocab_date, vocab_i_can,
-    retrieval_day, retrieval_date, retrieval_i_can,
-    inference_day, inference_date, inference_i_can,
+    vocab_day, vocab_date, vocab_i_can, vocab_lf,
+    retrieval_day, retrieval_date, retrieval_i_can, retrieval_lf,
+    inference_day, inference_date, inference_i_can, inference_lf,
     context, question_types, question_layouts, text_length,
+    year_group="Y4",
 ):
     word_count = WORD_COUNTS.get(text_length, "200–250")
     context_line = f"\nCURRICULUM CONTEXT: {context}" if context.strip() else ""
+
+    yg_text = YG_TEXT_GUIDANCE.get(year_group, YG_TEXT_GUIDANCE["Y4"])
+    yg_q    = YG_QUESTION_GUIDANCE.get(year_group, YG_QUESTION_GUIDANCE["Y4"])
+    yg_sup  = YG_SUPPORTED_GUIDANCE.get(year_group, YG_SUPPORTED_GUIDANCE["Y4"])
 
     type_r = _type_restriction(question_types)
     layout_r = _layout_restriction(question_layouts)
@@ -273,20 +339,29 @@ def _build_lesson_prompt(
             for i, (t, g) in enumerate(zip(slot_types[lt], LESSON_FORMAT_GUIDANCE[lt]))
         )
 
-    return f"""TOPIC: {topic}{context_line}
-TEXT_LENGTH: {word_count} words{type_r}{layout_r}
+    return f"""YEAR GROUP: {year_group}
+TOPIC: {topic}{context_line}
+TEXT_LENGTH: {word_count} words
+TEXT GUIDANCE: {yg_text}
+QUESTION GUIDANCE: {yg_q}
+SUPPORTED VERSION: {yg_sup}{type_r}{layout_r}
 
 KEY QUESTION: {key_question}
 
 LESSON SCHEDULE:
   Lesson 1 (Vocabulary):  {vocab_day}, {vocab_date}
+  Learning Focus: {vocab_lf or "To explore and explain the meaning of new vocabulary in context"}
   I can: {'; '.join(vocab_i_can)}
 
   Lesson 2 (Retrieval):   {retrieval_day}, {retrieval_date}
+  Learning Focus: {retrieval_lf or "To retrieve and record key information from a text"}
   I can: {'; '.join(retrieval_i_can)}
 
   Lesson 3 (Inference):   {inference_day}, {inference_date}
+  Learning Focus: {inference_lf or "To make and explain inferences using evidence from the text"}
   I can: {'; '.join(inference_i_can)}
+
+Return each lesson's learning_focus exactly as given above in the LESSON SCHEDULE.
 
 FORMAT GUIDANCE:
 Vocabulary:
@@ -344,16 +419,23 @@ OUTPUT: Valid JSON only — no preamble, no markdown fences.
 
 def _build_reading_paper_prompt(
     topic, key_question, num_questions, text_length,
-    question_types, question_layouts, context,
+    question_types, question_layouts, context, year_group="Y4",
 ):
     word_count = WORD_COUNTS.get(text_length, "200–250")
     context_line = f"\nCURRICULUM CONTEXT: {context}" if context.strip() else ""
     type_r = _type_restriction(question_types)
     layout_r = _layout_restriction(question_layouts)
+    yg_text = YG_TEXT_GUIDANCE.get(year_group, YG_TEXT_GUIDANCE["Y4"])
+    yg_q    = YG_QUESTION_GUIDANCE.get(year_group, YG_QUESTION_GUIDANCE["Y4"])
+    yg_sup  = YG_SUPPORTED_GUIDANCE.get(year_group, YG_SUPPORTED_GUIDANCE["Y4"])
 
     title_line = f"\nKEY QUESTION: {key_question}" if key_question.strip() else ""
-    return f"""TOPIC: {topic}{context_line}
+    return f"""YEAR GROUP: {year_group}
+TOPIC: {topic}{context_line}
 TEXT_LENGTH: {word_count} words
+TEXT GUIDANCE: {yg_text}
+QUESTION GUIDANCE: {yg_q}
+SUPPORTED VERSION: {yg_sup}
 NUMBER OF QUESTIONS: {num_questions}{type_r}{layout_r}{title_line}
 
 Generate exactly {num_questions} questions now. ONLY valid JSON — no markdown fences."""
@@ -480,16 +562,20 @@ def generate_content(
     vocab_day: str,
     vocab_date: str,
     vocab_i_can: list,
-    retrieval_day: str,
-    retrieval_date: str,
-    retrieval_i_can: list,
-    inference_day: str,
-    inference_date: str,
-    inference_i_can: list,
+    vocab_lf: str = "",
+    retrieval_day: str = "",
+    retrieval_date: str = "",
+    retrieval_i_can: list = None,
+    retrieval_lf: str = "",
+    inference_day: str = "",
+    inference_date: str = "",
+    inference_i_can: list = None,
+    inference_lf: str = "",
     context: str = "",
     question_types: list = None,
     question_layouts: list = None,
     text_length: str = "standard",
+    year_group: str = "Y4",
 ) -> dict:
     """
     Lesson Mode: generate 3 lessons × 7 questions.
@@ -497,13 +583,15 @@ def generate_content(
     """
     prompt = _build_lesson_prompt(
         topic=topic, key_question=key_question,
-        vocab_day=vocab_day, vocab_date=vocab_date, vocab_i_can=vocab_i_can,
+        vocab_day=vocab_day, vocab_date=vocab_date,
+        vocab_i_can=vocab_i_can, vocab_lf=vocab_lf,
         retrieval_day=retrieval_day, retrieval_date=retrieval_date,
-        retrieval_i_can=retrieval_i_can,
+        retrieval_i_can=retrieval_i_can or [], retrieval_lf=retrieval_lf,
         inference_day=inference_day, inference_date=inference_date,
-        inference_i_can=inference_i_can,
+        inference_i_can=inference_i_can or [], inference_lf=inference_lf,
         context=context, question_types=question_types,
         question_layouts=question_layouts, text_length=text_length,
+        year_group=year_group,
     )
     data = _call_api(LESSON_SYSTEM_PROMPT, prompt)
     _validate_lesson(data)
@@ -518,6 +606,7 @@ def generate_reading_paper(
     question_types: list = None,
     question_layouts: list = None,
     context: str = "",
+    year_group: str = "Y4",
 ) -> dict:
     """
     Reading Paper Mode: generate a text + flat question set.
@@ -527,7 +616,7 @@ def generate_reading_paper(
         topic=topic, key_question=key_question,
         num_questions=num_questions, text_length=text_length,
         question_types=question_types, question_layouts=question_layouts,
-        context=context,
+        context=context, year_group=year_group,
     )
     # More tokens for larger question sets
     max_tok = max(6000, num_questions * 600)

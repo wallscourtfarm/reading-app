@@ -41,6 +41,21 @@ GREY_LINE  = (0.6,   0.6,   0.6  )  # ruled lines, cell borders
 LIGHT_GREY = (0.94,  0.94,  0.94 )  # table cell backgrounds
 TICK_CELL  = (0.85,  0.95,  0.85 )  # answer highlight cell
 
+# Year group brand colours (kept separate from BOX_BORDER so set_year_group can override)
+_YG_COLOURS = {
+    "Y4": (0.090, 0.596, 0.827),  # #1798d3
+    "Y5": (0.898, 0.490, 0.141),  # #e57d24
+    "Y6": (0.169, 0.682, 0.384),  # #2bae62
+}
+# Active colour — updated by set_year_group(); defaults to Y4
+_ACCENT = _YG_COLOURS["Y4"]
+
+
+def set_year_group(year_group: str):
+    """Update the active accent colour for PDF branding. Call before build_pdfs()."""
+    global _ACCENT
+    _ACCENT = _YG_COLOURS.get(year_group, _YG_COLOURS["Y4"])
+
 
 def _coerce_answer(q):
     """
@@ -143,12 +158,12 @@ def draw_header(c, lesson_type, day, date, key_q, i_can_statements, icon_path):
     """Draw the learning label. Returns y immediately below the final rule."""
     y = H - MARGIN
 
-    # Row 1: "Key Question"  [icon]  "Day Date"
+    # Row 1: "Learning Focus"  [icon]  "Day Date"
     c.setFont("Helvetica-Bold", 8)
     c.setFillColorRGB(*DARK)
-    c.drawString(MARGIN, y - 5 * mm, "Key Question")
+    c.drawString(MARGIN, y - 5 * mm, "Learning Focus")
 
-    icon_x = MARGIN + 27 * mm
+    icon_x = MARGIN + 32 * mm
     try:
         c.drawImage(icon_path, icon_x, y - 7 * mm,
                     width=7 * mm, height=7 * mm,
@@ -160,13 +175,13 @@ def draw_header(c, lesson_type, day, date, key_q, i_can_statements, icon_path):
     c.drawString(icon_x + 8 * mm, y - 5 * mm, f"{day}  {date}")
     y -= 8 * mm
 
-    # Key question — bold, underlined, dark blue
+    # Learning focus text — bold, underlined, year group colour
     c.setFont("Helvetica-Bold", 10)
-    c.setFillColorRGB(*BOX_BORDER)
+    c.setFillColorRGB(*_ACCENT)
     c.drawString(MARGIN, y - 4 * mm, key_q)
     kq_w = c.stringWidth(key_q, "Helvetica-Bold", 10)
     c.setLineWidth(0.5)
-    c.setStrokeColorRGB(*BOX_BORDER)
+    c.setStrokeColorRGB(*_ACCENT)
     c.line(MARGIN, y - 5 * mm, MARGIN + kq_w, y - 5 * mm)
     y -= 7 * mm
 
@@ -1066,7 +1081,8 @@ def build_page(path, lesson, text, questions, is_answer, is_supported, icon_path
     lesson_type = lesson['lesson_type'].capitalize()
     day = lesson['day']
     date = lesson['date']
-    key_q = lesson.get('key_question', '')
+    # Use learning_focus for the header; fall back to key_question for legacy data
+    key_q = lesson.get('learning_focus') or lesson.get('key_question', '')
     i_cans = lesson.get('i_can_statements', [])
 
     y = draw_header(c, lesson_type, day, date, key_q, i_cans, icon_path)
@@ -1104,7 +1120,7 @@ def build_text_booklet_page(path, lesson, icon_path):
     lesson_type = lesson["lesson_type"].capitalize()
     day = lesson["day"]
     date_str = lesson["date"]
-    key_q = lesson.get("key_question", "")
+    key_q = lesson.get("learning_focus") or lesson.get("key_question", "")
     i_cans = lesson.get("i_can_statements", [])
 
     y = draw_header(c, lesson_type, day, date_str, key_q, i_cans, icon_path)
@@ -1131,9 +1147,10 @@ def build_text_booklet_page(path, lesson, icon_path):
 
 
 def build_pdfs(content: dict, icon_path: str, output_dir: str,
-               layout: str = "integrated") -> dict:
+               layout: str = "integrated", year_group: str = "Y4") -> dict:
     import tempfile, shutil
 
+    set_year_group(year_group)
     tmp = tempfile.mkdtemp()
     key_q = content.get('key_question', '')
 
@@ -1352,7 +1369,7 @@ def _build_reading_paper_text_pages(tmp_dir, text, title, font_size=11):
             # Paper title — "Reading Paper: [topic]"
             paper_title = f"Reading Paper: {title}"
             c.setFont("Helvetica-Bold", 12)
-            c.setFillColorRGB(*BOX_BORDER)
+            c.setFillColorRGB(*_ACCENT)
             for line in wrap_text(c, paper_title, "Helvetica-Bold", 12, CW):
                 c.drawString(MARGIN, y, line)
                 y -= 12 * 1.4
@@ -1416,6 +1433,7 @@ def build_reading_paper_pdfs(
     output_dir: str,
     include_label: bool = False,
     custom_label: str = "",
+    year_group: str = "Y4",
 ) -> dict:
     """
     Build PDFs for Reading Paper Mode.
@@ -1424,6 +1442,7 @@ def build_reading_paper_pdfs(
     """
     import tempfile, shutil
 
+    set_year_group(year_group)
     tmp = tempfile.mkdtemp()
     topic    = content.get("key_question", "") or content.get("topic", "")
     text     = content.get("standard_text", "")
@@ -1474,7 +1493,7 @@ def build_reading_paper_pdfs(
             y = H - MARGIN - 2 * mm
             # Paper title — left
             c.setFont("Helvetica-Bold", 11)
-            c.setFillColorRGB(*BOX_BORDER)
+            c.setFillColorRGB(*_ACCENT)
             c.drawString(MARGIN, y, paper_title)
             # Name space — right, same line
             c.setFont("Helvetica", 9)
@@ -1527,7 +1546,7 @@ def build_reading_paper_pdfs(
         if is_first:
             # Mark scheme title — links to paper_title
             c.setFont("Helvetica-Bold", 11)
-            c.setFillColorRGB(*BOX_BORDER)
+            c.setFillColorRGB(*_ACCENT)
             c.drawString(MARGIN, y, ms_title)
             y -= 11 * 1.4
             # Subtitle: "for Reading Paper: [topic]"

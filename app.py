@@ -37,6 +37,14 @@ LOGO_PATH     = Path("assets/wfa_logo.jpg")
 ICON_PATH     = Path("assets/reader.png")
 TEMPLATE_PATH = Path("template.pptx")
 
+YEAR_GROUPS = ["Y4", "Y5", "Y6"]
+
+YG_COLOURS = {
+    "Y4": "#1798d3",
+    "Y5": "#e57d24",
+    "Y6": "#2bae62",
+}
+
 I_CAN = {
     "vocabulary": [
         "I can explain the meaning of new words using context clues",
@@ -50,6 +58,12 @@ I_CAN = {
         "I can explain what a text implies using evidence",
         "I can make inferences based on what I have read",
     ],
+}
+
+LF_DEFAULTS = {
+    "vocabulary": "To explore and explain the meaning of new vocabulary in context",
+    "retrieval":  "To retrieve and record key information from a text",
+    "inference":  "To make and explain inferences using evidence from the text",
 }
 
 TEXT_LENGTHS = {
@@ -154,6 +168,24 @@ mode = st.radio(
 st.divider()
 
 # ---------------------------------------------------------------------------
+# Year group
+# ---------------------------------------------------------------------------
+st.markdown("#### Year group")
+year_group = st.radio(
+    "yg", YEAR_GROUPS,
+    horizontal=True, label_visibility="collapsed",
+    key="year_group_radio",
+)
+yg_colour = YG_COLOURS[year_group]
+
+# Inject year-group accent colour into CSS custom property
+st.markdown(
+    f"<style>:root {{--yg-accent: {yg_colour};}}</style>",
+    unsafe_allow_html=True,
+)
+st.divider()
+
+# ---------------------------------------------------------------------------
 # Topic + key question
 # ---------------------------------------------------------------------------
 topic = st.text_input(
@@ -187,6 +219,26 @@ if mode == "Lesson Mode":
         st.caption("Inference")
         inf_date = st.date_input("inf", value=_next_weekday(4),
                                   format="DD/MM/YYYY", label_visibility="collapsed")
+
+    st.markdown("#### Lesson objectives")
+    st.caption("Pre-filled with defaults — edit if needed.")
+    obj_tabs = st.tabs(["📖 Vocabulary", "🔍 Retrieval", "💡 Inference"])
+
+    with obj_tabs[0]:
+        voc_lf  = st.text_input("Learning Focus", value=LF_DEFAULTS["vocabulary"], key="voc_lf")
+        voc_ic1 = st.text_input("I can 1", value=I_CAN["vocabulary"][0], key="voc_ic1")
+        voc_ic2 = st.text_input("I can 2", value=I_CAN["vocabulary"][1], key="voc_ic2")
+
+    with obj_tabs[1]:
+        ret_lf  = st.text_input("Learning Focus", value=LF_DEFAULTS["retrieval"], key="ret_lf")
+        ret_ic1 = st.text_input("I can 1", value=I_CAN["retrieval"][0], key="ret_ic1")
+        ret_ic2 = st.text_input("I can 2", value=I_CAN["retrieval"][1], key="ret_ic2")
+
+    with obj_tabs[2]:
+        inf_lf  = st.text_input("Learning Focus", value=LF_DEFAULTS["inference"], key="inf_lf")
+        inf_ic1 = st.text_input("I can 1", value=I_CAN["inference"][0], key="inf_ic1")
+        inf_ic2 = st.text_input("I can 2", value=I_CAN["inference"][1], key="inf_ic2")
+
     st.divider()
 
 # ---------------------------------------------------------------------------
@@ -294,16 +346,20 @@ if st.button("Generate resources", type="primary",
                     topic=topic, key_question=key_question,
                     vocab_day=voc_date.strftime("%A"),
                     vocab_date=voc_date.strftime("%-d %B %Y"),
-                    vocab_i_can=I_CAN["vocabulary"],
+                    vocab_i_can=[voc_ic1, voc_ic2],
+                    vocab_lf=voc_lf,
                     retrieval_day=ret_date.strftime("%A"),
                     retrieval_date=ret_date.strftime("%-d %B %Y"),
-                    retrieval_i_can=I_CAN["retrieval"],
+                    retrieval_i_can=[ret_ic1, ret_ic2],
+                    retrieval_lf=ret_lf,
                     inference_day=inf_date.strftime("%A"),
                     inference_date=inf_date.strftime("%-d %B %Y"),
-                    inference_i_can=I_CAN["inference"],
+                    inference_i_can=[inf_ic1, inf_ic2],
+                    inference_lf=inf_lf,
                     question_types=question_types,
                     question_layouts=question_layouts,
                     text_length=text_length,
+                    year_group=year_group,
                 )
             except Exception as e:
                 st.error(f"Generation failed: {e}")
@@ -317,6 +373,7 @@ if st.button("Generate resources", type="primary",
                     text_length=text_length,
                     question_types=question_types,
                     question_layouts=question_layouts,
+                    year_group=year_group,
                 )
             except Exception as e:
                 st.error(f"Generation failed: {e}")
@@ -345,6 +402,7 @@ if st.button("Generate resources", type="primary",
                     icon_path=str(ICON_PATH) if ICON_PATH.exists() else "",
                     output_dir=tmp,
                     layout=layout,
+                    year_group=year_group,
                 )
 
             if out_standard and "standard" in pdf_paths:
@@ -400,6 +458,7 @@ if st.button("Generate resources", type="primary",
                     output_dir=tmp,
                     include_label=False,
                     custom_label="",
+                    year_group=year_group,
                 )
 
             st.session_state.downloads.append((
