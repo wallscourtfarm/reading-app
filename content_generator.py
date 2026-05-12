@@ -730,6 +730,22 @@ QUESTION WRITING RULES:
 - Do not use "pupils". Do not say "evaluate" or "analyse".
 - supported_scaffold: for open_line questions provide a brief sentence starter; null for all other formats.
 
+FIND AND COPY — CRITICAL RULES (read carefully before writing any find_and_copy question):
+A find_and_copy question asks pupils to locate a word in the text that means the same as
+a word given in the question. The key rule: the word given in the question MUST NOT appear
+in the text — if it did, pupils would just copy the exact word rather than finding a synonym.
+Steps to write a valid find_and_copy question:
+  1. Find a word in the text that pupils might not know (e.g. "frigid", "peculiar", "anxious").
+  2. Think of a simpler synonym not used in the text (e.g. "very cold", "strange", "worried").
+  3. Write: "Find and copy one word that means the same as '[simpler synonym]'."
+  4. The answer is the hard word from the text (e.g. "frigid").
+  5. Verify: the answer word IS in the text AND the question word IS NOT in the text.
+BAD EXAMPLE: text contains "She wondered what it could be." → question asks "Find and copy
+one word that means the same as 'wondered'." This is wrong because 'wondered' is the
+actual text word — there is no synonym to find. Do NOT do this.
+GOOD EXAMPLE: text contains "She was astonished to see a rainbow." → question asks "Find
+and copy one word that means the same as 'very surprised'." Answer: "astonished". ✓
+
 OUTPUT: Valid JSON only — no preamble, no markdown fences.
 
 {{
@@ -784,6 +800,18 @@ QUESTION RULES (Paper 1):
 - tick_one: "Tick one." instruction, four options, one correct.
 - find_and_copy: exact word from the text chunk above.
 
+FIND AND COPY — CRITICAL RULES:
+A find_and_copy question asks pupils to locate a word in the text CHUNK ABOVE that means
+the same as a word given in the question. The word in the question MUST NOT be the same
+word that appears in the text.
+  1. Find a word in the chunk that pupils might not know (e.g. "crept", "peculiar").
+  2. Write a simpler synonym not used in the chunk (e.g. "moved quietly", "strange").
+  3. Write: "Find and copy one word that means the same as '[simpler synonym]'."
+  4. The answer is the harder word from the chunk.
+  5. Verify: answer IS in the chunk AND the question descriptor is NOT in the chunk.
+NEVER ask for a synonym of a word that is already the only or obvious instance in the chunk.
+If the chunk has no suitable word to target, use open_line or tick_one instead.
+
 OUTPUT: Valid JSON only — no preamble, no markdown fences.
 
 {{
@@ -831,14 +859,22 @@ Generate {q_count} questions now. ONLY valid JSON — no markdown fences."""
 def _validate_ks1_paper2_passage(data, passage_label=""):
     if not data.get("standard_text", "").strip():
         raise ValueError(f"{passage_label}: missing standard_text")
+    text_lower = data["standard_text"].lower()
     qs = data.get("questions", [])
     if not (6 <= len(qs) <= 12):
         raise ValueError(f"{passage_label}: expected 6–12 questions, got {len(qs)}")
     for q in qs:
         _validate_question(q, lesson_label=passage_label)
-        # KS1 mark cap
         if q.get("marks", 1) > 2:
             raise ValueError(f"{passage_label} Q{q.get('number','?')}: KS1 max 2 marks")
+        # find_and_copy: answer must appear verbatim in text
+        if q.get("format") == "find_and_copy":
+            answer = _coerce_str(q.get("answer", "")).strip().lower()
+            if answer and answer not in text_lower:
+                raise ValueError(
+                    f"{passage_label} Q{q.get('number','?')}: find_and_copy answer "
+                    f"'{answer}' not found verbatim in text — invalid question"
+                )
 
 
 def _validate_ks1_paper1_passage(data, passage_label=""):
@@ -849,8 +885,10 @@ def _validate_ks1_paper1_passage(data, passage_label=""):
         raise ValueError(f"{passage_label}: expected 3–7 sections, got {len(sections)}")
     q_num = 0
     for i, section in enumerate(sections):
-        if not section.get("text_chunk", "").strip():
+        chunk = section.get("text_chunk", "")
+        if not chunk.strip():
             raise ValueError(f"{passage_label} section {i+1}: missing text_chunk")
+        chunk_lower = chunk.lower()
         qs = section.get("questions", [])
         if not (1 <= len(qs) <= 2):
             raise ValueError(f"{passage_label} section {i+1}: expected 1–2 questions")
@@ -865,6 +903,14 @@ def _validate_ks1_paper1_passage(data, passage_label=""):
                 raise ValueError(
                     f"{passage_label} section {i+1}: Paper 1 questions must be 1 mark"
                 )
+            # find_and_copy: answer must appear verbatim in the chunk above
+            if fmt == "find_and_copy":
+                answer = _coerce_str(q.get("answer", "")).strip().lower()
+                if answer and answer not in chunk_lower:
+                    raise ValueError(
+                        f"{passage_label} section {i+1}: find_and_copy answer "
+                        f"'{answer}' not found in text chunk — invalid question"
+                    )
 
 
 def _build_ks1_paper1_prompt(topic, text_type, year_group, context=""):
@@ -880,6 +926,115 @@ TEXT GUIDANCE: {yg_text}
 Generate the passage now. ONLY valid JSON — no markdown fences."""
 
 
+# ---------------------------------------------------------------------------
+# Post-generation semantic QA
+# ---------------------------------------------------------------------------
+
+_QA_SYSTEM = (
+    "You are a KS1 reading paper quality checker. "
+    "You receive a reading text and comprehension questions. "
+    "Find and fix all errors silently. "
+    "Return ONLY corrected JSON — no preamble, no explanation, no markdown fences."
+)
+
+_QA_RULES = """
+RULES — apply to every question without exception:
+
+open_line
+  Is the answer actually correct based on the text? Fix wrong answers.
+  Does the answer describe something stated or clearly implied by the text? Fix if not.
+
+tick_one
+  Is options[correct_index] genuinely the right answer according to the text? Fix the index if not.
+  Are the three distractors wrong but plausible? If a distractor is also correct, fix it.
+  If the correct answer is not among the options at all, rewrite the options so one is correct.
+
+find_and_copy
+  Rule 1: answer must appear VERBATIM (exact spelling) in the relevant text.
+  Rule 2: answer must be a genuine synonym of the word/phrase given in the question.
+  Rule 3: the word/phrase given in the question must NOT appear in the relevant text —
+           if it did, pupils would just copy it directly rather than finding a synonym.
+  If Rule 1 fails: find a word that is in the text and is a genuine synonym, or convert to open_line.
+  If Rule 2 fails: replace the question with a valid find_and_copy targeting a different word,
+                   or convert to open_line if no suitable word exists.
+  If Rule 3 fails (question word IS in the text): rewrite the question using a synonym of the
+           answer word that does NOT appear in the text, or convert to open_line.
+
+true_false_table
+  Check every statement against the text. Is each one correctly labelled true or false?
+  Fix any wrong labels. If a statement is ambiguous or unanswerable, rewrite it clearly.
+
+numbered_list
+  Are all items in the answer field supported by the text? Fix any item that is wrong or not in the text.
+
+draw_lines_matching
+  Do the correct_pairs correctly map left_items indices to right_items indices?
+  Verify each pairing against the text facts. Fix any wrong pair.
+
+IMPORTANT: Preserve all JSON field names and structure. Only change values that are wrong.
+Return all questions, including unchanged ones.
+"""
+
+
+def _qa_flat_questions(text: str, questions: list) -> list:
+    """
+    Semantic QA pass on a flat question list against a text.
+    Calls Claude to verify and correct every question.
+    Returns corrected list, or original list if QA call fails.
+    """
+    if not questions:
+        return questions
+    prompt = (
+        f"TEXT:\n{text}\n\n"
+        f"QUESTIONS TO CHECK:\n{json.dumps(questions, indent=2)}\n\n"
+        f"{_QA_RULES}\n\n"
+        "Return the corrected questions as a JSON array only."
+    )
+    try:
+        result = _call_api(_QA_SYSTEM, prompt, max_tokens=6000)
+        if isinstance(result, list) and len(result) == len(questions):
+            return result
+        # If Claude returned a dict with a questions key, unwrap it
+        if isinstance(result, dict):
+            for key in ("questions", "corrected", "items"):
+                if isinstance(result.get(key), list):
+                    return result[key]
+        return questions  # unexpected shape — keep originals
+    except Exception:
+        return questions  # QA failure must not crash generation
+
+
+def _qa_paper1_sections(sections: list) -> list:
+    """
+    Semantic QA pass for Paper 1 combined format.
+    Each question is checked against its specific text chunk.
+    Returns corrected sections list, or originals if QA call fails.
+    """
+    if not sections:
+        return sections
+    prompt = (
+        "PAPER 1 SECTIONS — each question must be checked against its own text_chunk ONLY, "
+        "not against other chunks:\n\n"
+        f"{json.dumps(sections, indent=2)}\n\n"
+        f"{_QA_RULES}\n\n"
+        "Additional rule for find_and_copy in Paper 1: "
+        "the answer must appear verbatim in the same section's text_chunk, not elsewhere.\n\n"
+        "Return the corrected sections as a JSON array with the same structure "
+        "(list of objects each with text_chunk and questions). "
+        "Do not alter text_chunk values."
+    )
+    try:
+        result = _call_api(_QA_SYSTEM, prompt, max_tokens=8000)
+        if isinstance(result, list) and len(result) == len(sections):
+            # Preserve original text_chunks — only questions may change
+            for orig, corr in zip(sections, result):
+                corr["text_chunk"] = orig.get("text_chunk", corr.get("text_chunk", ""))
+            return result
+        return sections
+    except Exception:
+        return sections
+
+
 def generate_ks1_paper(
     topic1: str,
     text_type1: str,
@@ -893,24 +1048,34 @@ def generate_ks1_paper(
     KS1 Reading Paper generator.
     paper_type: "separate"  → Paper 2 (text booklet + answer booklet)
                 "combined"  → Paper 1 (text and questions on same pages)
+    Each passage goes through:
+      1. Generation
+      2. Structural validation
+      3. Semantic QA pass (Claude reviews and corrects every question against the text)
+      4. Re-validation after QA
     Returns:
       {
         "paper_type": "separate"|"combined",
-        "passage1": {...},   # standard_text+questions for separate; title+sections for combined
+        "passage1": {...},
         "passage2": {...},
       }
     """
     if paper_type == "combined":
         system = KS1_PAPER1_SYSTEM_PROMPT
+
         p1 = _call_api(system,
                        _build_ks1_paper1_prompt(topic1, text_type1, year_group, context),
                        max_tokens=8000)
         _validate_ks1_paper1_passage(p1, "Passage 1")
+        p1["sections"] = _qa_paper1_sections(p1.get("sections", []))
+        _validate_ks1_paper1_passage(p1, "Passage 1 (post-QA)")
 
         p2 = _call_api(system,
                        _build_ks1_paper1_prompt(topic2, text_type2, year_group, context),
                        max_tokens=8000)
         _validate_ks1_paper1_passage(p2, "Passage 2")
+        p2["sections"] = _qa_paper1_sections(p2.get("sections", []))
+        _validate_ks1_paper1_passage(p2, "Passage 2 (post-QA)")
 
         # Renumber questions across passages (P2 continues from P1)
         offset = sum(len(s.get("questions", [])) for s in p1.get("sections", []))
@@ -920,15 +1085,24 @@ def generate_ks1_paper(
 
     else:  # separate (Paper 2)
         system = KS1_PAPER2_SYSTEM_PROMPT
+
         p1 = _call_api(system,
                        _build_ks1_paper2_prompt(topic1, text_type1, year_group, context),
                        max_tokens=8000)
         _validate_ks1_paper2_passage(p1, "Passage 1")
+        p1["questions"] = _qa_flat_questions(
+            p1.get("standard_text", ""), p1.get("questions", [])
+        )
+        _validate_ks1_paper2_passage(p1, "Passage 1 (post-QA)")
 
         p2 = _call_api(system,
                        _build_ks1_paper2_prompt(topic2, text_type2, year_group, context),
                        max_tokens=8000)
         _validate_ks1_paper2_passage(p2, "Passage 2")
+        p2["questions"] = _qa_flat_questions(
+            p2.get("standard_text", ""), p2.get("questions", [])
+        )
+        _validate_ks1_paper2_passage(p2, "Passage 2 (post-QA)")
 
         # Renumber questions across passages
         offset = len(p1.get("questions", []))
