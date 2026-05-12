@@ -1150,37 +1150,76 @@ def build_question_pages(
 # Reading Paper PDF builder
 # ===========================================================================
 
-def _build_reading_paper_text_pages(tmp_dir, text, key_question, font_size=11):
+def _build_reading_paper_text_pages(tmp_dir, text, title, font_size=11):
     """
-    Build text-only page(s) for a reading paper. No learning label.
-    Returns list of page paths.
+    Build text-only page(s) for a reading paper.
+    Flows segments across as many pages as needed. Returns list of page paths.
     """
-    pages = []
-    path = os.path.join(tmp_dir, "rp_text_p1.pdf")
-    c = rl_canvas.Canvas(path, pagesize=A4)
-    y = H - MARGIN - 2 * mm
+    lh_body = font_size * 1.42
+    lh_head = font_size * 1.35
+    seg_gap  = 2.5 * mm
+    padding  = 3.5 * mm
 
-    # Key question as title
-    c.setFont("Helvetica-Bold", 12)
-    c.setFillColorRGB(*BOX_BORDER)
-    title_lines = wrap_text(c, key_question, "Helvetica-Bold", 12, CW)
-    for line in title_lines:
-        c.drawString(MARGIN, y, line)
-        y -= 12 * 1.4
-    y -= 3 * mm
+    segments = _parse_structured_text(text)
+    pages    = []
+    seg_idx  = 0
+    page_num = 0
 
-    # Thin rule below title
-    c.setStrokeColorRGB(*GREY_LINE)
-    c.setLineWidth(0.5)
-    c.line(MARGIN, y, MARGIN + CW, y)
-    y -= 5 * mm
+    while seg_idx < len(segments):
+        page_num += 1
+        p = os.path.join(tmp_dir, f"rp_text_p{page_num}.pdf")
+        c = rl_canvas.Canvas(p, pagesize=A4)
 
-    # Text — structured box, potentially long
-    # If text would overflow, start a new page (simplified: draw and check)
-    y = draw_structured_text_box(c, text, y, font_size=font_size)
+        # ── Title block (first page only) ─────────────────────────────
+        if page_num == 1 and title:
+            y = H - MARGIN - 2 * mm
+            c.setFont("Helvetica-Bold", 12)
+            c.setFillColorRGB(*BOX_BORDER)
+            for line in wrap_text(c, title, "Helvetica-Bold", 12, CW):
+                c.drawString(MARGIN, y, line)
+                y -= 12 * 1.4
+            y -= 3 * mm
+            c.setStrokeColorRGB(*GREY_LINE)
+            c.setLineWidth(0.5)
+            c.line(MARGIN, y, MARGIN + CW, y)
+            y -= 5 * mm
+            box_top = y
+        else:
+            box_top = H - MARGIN - 2 * mm
 
-    c.save()
-    pages.append(path)
+        box_bottom = MARGIN
+
+        # ── Draw box background for this page ─────────────────────────
+        c.setFillColorRGB(*BOX_BG)
+        c.setStrokeColorRGB(*BOX_BORDER)
+        c.setLineWidth(0.8)
+        c.roundRect(MARGIN, box_bottom, CW, box_top - box_bottom,
+                    2 * mm, fill=1, stroke=1)
+
+        # ── Render segments that fit on this page ──────────────────────
+        ty = box_top - padding
+        c.setFillColorRGB(*DARK)
+
+        while seg_idx < len(segments):
+            is_heading, content = segments[seg_idx]
+            font = "Helvetica-Bold" if is_heading else "Helvetica"
+            lh   = lh_head if is_heading else lh_body
+            lines = wrap_text(c, content, font, font_size, CW - 6 * mm)
+            seg_h = len(lines) * lh + seg_gap
+
+            if ty - seg_h < box_bottom + padding:
+                break  # this segment goes on the next page
+
+            c.setFont(font, font_size)
+            for line in lines:
+                ty -= lh
+                c.drawString(MARGIN + 3 * mm, ty, line)
+            ty -= seg_gap
+            seg_idx += 1
+
+        c.save()
+        pages.append(p)
+
     return pages
 
 
