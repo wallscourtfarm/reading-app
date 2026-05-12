@@ -33,7 +33,7 @@ st.set_page_config(
     layout="centered",
 )
 
-LOGO_PATH     = Path("assets/wfa_logo.webp")
+LOGO_PATH     = Path("assets/wfa_logo.jpg")
 ICON_PATH     = Path("assets/reader.png")
 TEMPLATE_PATH = Path("template.pptx")
 
@@ -93,15 +93,54 @@ if "preview_text" not in st.session_state:
     st.session_state.preview_text = ""
 
 # ---------------------------------------------------------------------------
-# Header
+# CSS — school colour overrides
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+/* Dividers */
+hr { border-color: #1798d3 !important; opacity: 0.3; }
+
+/* Section headings */
+h4 { color: #1798d3 !important; }
+
+/* Download buttons — secondary style */
+div[data-testid="stDownloadButton"] > button {
+    border: 1.5px solid #1798d3 !important;
+    color: #1798d3 !important;
+    background: #ffffff !important;
+}
+div[data-testid="stDownloadButton"] > button:hover {
+    background: #e8f5fc !important;
+}
+
+/* Info / success banners */
+div[data-testid="stAlert"] {
+    border-left-color: #1798d3 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Header — logo and title on same line
 # ---------------------------------------------------------------------------
 if LOGO_PATH.exists():
+    logo_b64 = _b64_img(LOGO_PATH)
     st.markdown(
-        f'<img src="data:image/webp;base64,{_b64_img(LOGO_PATH)}" '
-        f'style="height:52px;margin-bottom:4px;">',
+        f"""
+        <div style="display:flex;align-items:center;gap:18px;margin-bottom:6px;">
+          <img src="data:image/jpeg;base64,{logo_b64}"
+               style="height:64px;width:auto;flex-shrink:0;">
+          <span style="font-size:2rem;font-weight:700;
+                       color:#1798d3;line-height:1.15;">Being a Reader</span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-st.title("Being a Reader")
+else:
+    st.markdown(
+        '<span style="font-size:2rem;font-weight:700;color:#1798d3;">Being a Reader</span>',
+        unsafe_allow_html=True,
+    )
 st.divider()
 
 # ---------------------------------------------------------------------------
