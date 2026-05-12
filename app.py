@@ -15,10 +15,11 @@ import streamlit as st
 from content_generator import (
     generate_content,
     generate_reading_paper,
+    generate_ks1_paper,
     QUESTION_TYPES,
     QUESTION_LAYOUTS,
 )
-from pdf_builder import build_pdfs, build_reading_paper_pdfs
+from pdf_builder import build_pdfs, build_reading_paper_pdfs, build_ks1_paper2_pdfs, build_ks1_paper1_pdfs
 from excel_builder import build_excel
 
 try:
@@ -37,13 +38,17 @@ LOGO_PATH     = Path("assets/wfa_logo.jpg")
 ICON_PATH     = Path("assets/reader.png")
 TEMPLATE_PATH = Path("template.pptx")
 
-YEAR_GROUPS = ["Y4", "Y5", "Y6"]
+YEAR_GROUPS = ["Y1", "Y2", "Y4", "Y5", "Y6"]
 
 YG_COLOURS = {
+    "Y1": "#e57d24",   # Beech — shared with Y5
+    "Y2": "#2bae62",   # Willow — shared with Y6
     "Y4": "#1798d3",
     "Y5": "#e57d24",
     "Y6": "#2bae62",
 }
+
+KS1_YEAR_GROUPS = {"Y1", "Y2"}
 
 I_CAN = {
     "vocabulary": [
@@ -158,16 +163,6 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# a) Mode
-# ---------------------------------------------------------------------------
-st.markdown("#### Mode")
-mode = st.radio(
-    "mode", ["Lesson Mode", "Reading Paper Mode"],
-    horizontal=True, label_visibility="collapsed",
-)
-st.divider()
-
-# ---------------------------------------------------------------------------
 # Year group
 # ---------------------------------------------------------------------------
 st.markdown("#### Year group")
@@ -186,19 +181,64 @@ st.markdown(
 st.divider()
 
 # ---------------------------------------------------------------------------
+# a) Mode — KS1 year groups get a different set of options
+# ---------------------------------------------------------------------------
+st.markdown("#### Mode")
+is_ks1 = year_group in KS1_YEAR_GROUPS
+
+if is_ks1:
+    mode = "KS1 Reading Paper"
+    st.info("KS1 Reading Paper mode — generating both passages and mark scheme.")
+    ks1_paper_type = st.radio(
+        "Paper type",
+        ["Separate text + questions (Paper 2)", "Combined text and questions (Paper 1)"],
+        horizontal=True,
+    )
+    ks1_paper_type_key = "separate" if "Separate" in ks1_paper_type else "combined"
+else:
+    mode = st.radio(
+        "mode", ["Lesson Mode", "Reading Paper Mode"],
+        horizontal=True, label_visibility="collapsed",
+    )
+    ks1_paper_type_key = ""
+st.divider()
+
+# ---------------------------------------------------------------------------
 # Topic + key question
 # ---------------------------------------------------------------------------
-topic = st.text_input(
-    "Topic / text focus",
-    placeholder="e.g. Anglo-Saxons, Sound waves, Charlotte's Web chapter 3",
-)
-if mode == "Lesson Mode":
-    key_question = st.text_input(
-        "Key question",
-        placeholder="e.g. What can objects tell us about how Anglo-Saxons lived?",
-    )
-else:
+if is_ks1:
+    st.markdown("#### Passage 1")
+    c1a, c1b = st.columns(2)
+    with c1a:
+        topic1 = st.text_input("Topic / title", placeholder="e.g. The Life of Honeybees",
+                                key="ks1_topic1")
+    with c1b:
+        text_type1 = st.selectbox("Text type", ["non_fiction", "fiction", "poetry"],
+                                   key="ks1_type1",
+                                   format_func=lambda x: x.replace("_", "-").title())
+    st.markdown("#### Passage 2")
+    c2a, c2b = st.columns(2)
+    with c2a:
+        topic2 = st.text_input("Topic / title", placeholder="e.g. The Lost Kite",
+                                key="ks1_topic2")
+    with c2b:
+        text_type2 = st.selectbox("Text type", ["fiction", "non_fiction", "poetry"],
+                                   key="ks1_type2",
+                                   format_func=lambda x: x.replace("_", "-").title())
+    topic = topic1  # used for week_ref filename
     key_question = ""
+else:
+    topic = st.text_input(
+        "Topic / text focus",
+        placeholder="e.g. Anglo-Saxons, Sound waves, Charlotte's Web chapter 3",
+    )
+    if mode == "Lesson Mode":
+        key_question = st.text_input(
+            "Key question",
+            placeholder="e.g. What can objects tell us about how Anglo-Saxons lived?",
+        )
+    else:
+        key_question = ""
 st.divider()
 
 # ---------------------------------------------------------------------------
@@ -241,96 +281,102 @@ if mode == "Lesson Mode":
 
     st.divider()
 
-# ---------------------------------------------------------------------------
-# b) Text length
-# ---------------------------------------------------------------------------
-st.markdown("#### Text length")
-tl_label = st.radio(
-    "tl", list(TEXT_LENGTHS.keys()),
-    horizontal=True, label_visibility="collapsed",
-)
-text_length = TEXT_LENGTHS[tl_label]
-st.divider()
-
-# ---------------------------------------------------------------------------
-# c) Number of questions (Reading Paper Mode only)
-# ---------------------------------------------------------------------------
-if mode == "Reading Paper Mode":
-    st.markdown("#### Number of questions")
-    num_questions = st.slider(
-        "nq", min_value=5, max_value=20, value=10,
-        label_visibility="collapsed",
+if not is_ks1:
+    # ---------------------------------------------------------------------------
+    # b) Text length
+    # ---------------------------------------------------------------------------
+    st.markdown("#### Text length")
+    tl_label = st.radio(
+        "tl", list(TEXT_LENGTHS.keys()),
+        horizontal=True, label_visibility="collapsed",
     )
+    text_length = TEXT_LENGTHS[tl_label]
     st.divider()
 
-# ---------------------------------------------------------------------------
-# d) Question types
-# ---------------------------------------------------------------------------
-st.markdown("#### Question types")
-qt_choice = st.radio(
-    "qt_choice",
-    ["Variety (recommended)", "Select specific types"],
-    horizontal=True, label_visibility="collapsed",
-    key="qt_choice_radio",
-)
-question_types = None
-if qt_choice == "Select specific types":
-    checked_types = _checkbox_grid(list(QUESTION_TYPES.keys()), "qt")
-    question_types = [QUESTION_TYPES[l] for l in checked_types] or None
-st.divider()
+    # ---------------------------------------------------------------------------
+    # c) Number of questions (Reading Paper Mode only)
+    # ---------------------------------------------------------------------------
+    if mode == "Reading Paper Mode":
+        st.markdown("#### Number of questions")
+        num_questions = st.slider(
+            "nq", min_value=5, max_value=20, value=10,
+            label_visibility="collapsed",
+        )
+        st.divider()
 
-# ---------------------------------------------------------------------------
-# e) Question layouts
-# ---------------------------------------------------------------------------
-st.markdown("#### Question layouts")
-ql_choice = st.radio(
-    "ql_choice",
-    ["Variety (recommended)", "Select specific layouts"],
-    horizontal=True, label_visibility="collapsed",
-    key="ql_choice_radio",
-)
-question_layouts = None
-if ql_choice == "Select specific layouts":
-    checked_layouts = _checkbox_grid(list(QUESTION_LAYOUTS.keys()), "ql")
-    question_layouts = [QUESTION_LAYOUTS[l] for l in checked_layouts] or None
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Lesson Mode extras
-# ---------------------------------------------------------------------------
-if mode == "Lesson Mode":
-    st.markdown("#### Learning label")
-    include_label = st.checkbox(
-        "Include learning label (added automatically per lesson type)",
-        value=True,
+    # ---------------------------------------------------------------------------
+    # d) Question types
+    # ---------------------------------------------------------------------------
+    st.markdown("#### Question types")
+    qt_choice = st.radio(
+        "qt_choice",
+        ["Variety (recommended)", "Select specific types"],
+        horizontal=True, label_visibility="collapsed",
+        key="qt_choice_radio",
     )
-
-    st.markdown("#### Outputs")
-    oc1, oc2, oc3 = st.columns(3)
-    out_standard  = oc1.checkbox("Standard Pupil PDF",  value=True)
-    out_supported = oc2.checkbox("Supported Pupil PDF", value=True)
-    out_answers   = oc3.checkbox("All Answers PDF",     value=True)
-    oc4, oc5, _   = st.columns(3)
-    out_pptx = oc4.checkbox("Teaching PPTX", value=True)
-    out_xlsx = oc5.checkbox("Content XLSX",  value=True)
-
-    st.markdown("#### Layout")
-    layout_label = st.radio(
-        "layout",
-        ["Combined text and questions", "Separate text and questions"],
-        label_visibility="collapsed",
-    )
-    layout = "sats" if "Separate" in layout_label else "integrated"
+    question_types = None
+    if qt_choice == "Select specific types":
+        checked_types = _checkbox_grid(list(QUESTION_TYPES.keys()), "qt")
+        question_types = [QUESTION_TYPES[l] for l in checked_types] or None
     st.divider()
+
+    # ---------------------------------------------------------------------------
+    # e) Question layouts
+    # ---------------------------------------------------------------------------
+    st.markdown("#### Question layouts")
+    ql_choice = st.radio(
+        "ql_choice",
+        ["Variety (recommended)", "Select specific layouts"],
+        horizontal=True, label_visibility="collapsed",
+        key="ql_choice_radio",
+    )
+    question_layouts = None
+    if ql_choice == "Select specific layouts":
+        checked_layouts = _checkbox_grid(list(QUESTION_LAYOUTS.keys()), "ql")
+        question_layouts = [QUESTION_LAYOUTS[l] for l in checked_layouts] or None
+    st.divider()
+
+    # ---------------------------------------------------------------------------
+    # Lesson Mode extras
+    # ---------------------------------------------------------------------------
+    if mode == "Lesson Mode":
+        st.markdown("#### Learning label")
+        include_label = st.checkbox(
+            "Include learning label (added automatically per lesson type)",
+            value=True,
+        )
+
+        st.markdown("#### Outputs")
+        oc1, oc2, oc3 = st.columns(3)
+        out_standard  = oc1.checkbox("Standard Pupil PDF",  value=True)
+        out_supported = oc2.checkbox("Supported Pupil PDF", value=True)
+        out_answers   = oc3.checkbox("All Answers PDF",     value=True)
+        oc4, oc5, _   = st.columns(3)
+        out_pptx = oc4.checkbox("Teaching PPTX", value=True)
+        out_xlsx = oc5.checkbox("Content XLSX",  value=True)
+
+        st.markdown("#### Layout")
+        layout_label = st.radio(
+            "layout",
+            ["Combined text and questions", "Separate text and questions"],
+            label_visibility="collapsed",
+        )
+        layout = "sats" if "Separate" in layout_label else "integrated"
+        st.divider()
 
 # ---------------------------------------------------------------------------
 # Generate button
 # ---------------------------------------------------------------------------
-ready = bool(topic.strip()) and (
-    bool(key_question.strip()) if mode == "Lesson Mode" else True
-)
-if not ready:
-    st.info("Enter a topic and key question to continue.")
+if is_ks1:
+    ready = bool(topic1.strip()) and bool(topic2.strip())
+    if not ready:
+        st.info("Enter topics for both passages to continue.")
+else:
+    ready = bool(topic.strip()) and (
+        bool(key_question.strip()) if mode == "Lesson Mode" else True
+    )
+    if not ready:
+        st.info("Enter a topic and key question to continue.")
 
 if st.button("Generate resources", type="primary",
              disabled=not ready, use_container_width=True):
@@ -339,7 +385,23 @@ if st.button("Generate resources", type="primary",
     st.session_state.downloads = []
     st.session_state.preview_text = ""
 
-    if mode == "Lesson Mode":
+    if is_ks1:
+        ptype_label = "Paper 1 (combined)" if ks1_paper_type_key == "combined" else "Paper 2 (separate)"
+        with st.spinner(f"Generating KS1 {ptype_label} — two passages… (40–80 seconds)"):
+            try:
+                content = generate_ks1_paper(
+                    topic1=topic1,
+                    text_type1=text_type1,
+                    topic2=topic2,
+                    text_type2=text_type2,
+                    paper_type=ks1_paper_type_key,
+                    year_group=year_group,
+                )
+            except Exception as e:
+                st.error(f"Generation failed: {e}")
+                st.stop()
+
+    elif mode == "Lesson Mode":
         with st.spinner("Generating reading extract and lessons… (20–40 seconds)"):
             try:
                 content = generate_content(
@@ -379,11 +441,22 @@ if st.button("Generate resources", type="primary",
                 st.error(f"Generation failed: {e}")
                 st.stop()
 
-    generated_text = content.get("standard_text", "")
-    content["topic"] = topic
-    for lesson in content.get("lessons", []):
-        lesson["text"] = generated_text
-    st.session_state.preview_text = generated_text
+    if is_ks1:
+        # KS1: preview first passage text
+        p1 = content.get("passage1", {})
+        if content.get("paper_type") == "combined":
+            preview = " ".join(
+                s.get("text_chunk", "") for s in p1.get("sections", [])
+            )
+        else:
+            preview = p1.get("standard_text", "")
+        st.session_state.preview_text = preview
+    else:
+        generated_text = content.get("standard_text", "")
+        content["topic"] = topic
+        for lesson in content.get("lessons", []):
+            lesson["text"] = generated_text
+        st.session_state.preview_text = generated_text
 
     tmp = tempfile.mkdtemp()
     try:
@@ -393,7 +466,48 @@ if st.button("Generate resources", type="primary",
         XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
                      ".spreadsheetml.sheet")
 
-        if mode == "Lesson Mode":
+        if is_ks1:
+            week_ref = date.today().strftime("%d%b").upper()
+            with st.spinner("Building KS1 reading paper PDFs…"):
+                if ks1_paper_type_key == "combined":
+                    pdf_paths = build_ks1_paper1_pdfs(
+                        content=content,
+                        output_dir=tmp,
+                        year_group=year_group,
+                    )
+                    st.session_state.downloads.append((
+                        "📄 Combined Pupil Booklet",
+                        _read_bytes(pdf_paths["combined"]),
+                        PDF_MIME, f"KS1_{year_group}_{week_ref}_Combined.pdf"
+                    ))
+                else:
+                    pdf_paths = build_ks1_paper2_pdfs(
+                        content=content,
+                        output_dir=tmp,
+                        year_group=year_group,
+                    )
+                    st.session_state.downloads.append((
+                        "📄 Reading Text Booklet",
+                        _read_bytes(pdf_paths["text"]),
+                        PDF_MIME, f"KS1_{year_group}_{week_ref}_Text.pdf"
+                    ))
+                    st.session_state.downloads.append((
+                        "📄 Answer Booklet",
+                        _read_bytes(pdf_paths["questions"]),
+                        PDF_MIME, f"KS1_{year_group}_{week_ref}_Questions.pdf"
+                    ))
+                    st.session_state.downloads.append((
+                        "📄 Supported Answer Booklet",
+                        _read_bytes(pdf_paths["supported"]),
+                        PDF_MIME, f"KS1_{year_group}_{week_ref}_Supported.pdf"
+                    ))
+                st.session_state.downloads.append((
+                    "📄 Mark Scheme",
+                    _read_bytes(pdf_paths["mark_scheme"]),
+                    PDF_MIME, f"KS1_{year_group}_{week_ref}_MarkScheme.pdf"
+                ))
+
+        elif mode == "Lesson Mode":
             week_ref = voc_date.strftime("%d%b").upper()
 
             with st.spinner("Building PDFs…"):

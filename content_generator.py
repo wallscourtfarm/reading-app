@@ -22,6 +22,22 @@ WORD_COUNTS = {
 }
 
 YG_TEXT_GUIDANCE = {
+    "Y1": (
+        "Age 5–6. Very simple sentences of 5–8 words. Common Reception/Y1 vocabulary only. "
+        "Fiction: familiar, everyday settings (home, school, garden, park) with simple characters "
+        "and a clear event. Non-fiction: one concrete topic, very short sentences, bold subheadings "
+        "to break text into 3–4 sections. Poetry: short rhyming verse, 8–16 lines. "
+        "Embed 3–4 slightly ambitious but inferable words — these become question targets. "
+        "Total text: 280–380 words. Paragraphs 2–3 sentences maximum."
+    ),
+    "Y2": (
+        "Age 6–7. Simple but varied sentences of 8–12 words. Year 1/2 CEW vocabulary with "
+        "4–5 slightly challenging words deliberately seeded as question targets. "
+        "Fiction: clear narrative with recognisable characters, a problem and resolution. "
+        "Non-fiction: clear topic sentences, 3–4 subheaded sections, one bullet-point or facts section. "
+        "Poetry: rhyming or free verse, 12–20 lines, accessible imagery. "
+        "Total text: 350–500 words."
+    ),
     "Y4": (
         "Age 8–9. Accessible prose with Tier 2 vocabulary embedded naturally. "
         "Sentences varied but clear. Y3/4 CEW list. Inference requires reading between "
@@ -43,6 +59,23 @@ YG_TEXT_GUIDANCE = {
 }
 
 YG_QUESTION_GUIDANCE = {
+    "Y1": (
+        "KS1 content domains: 1a (vocabulary), 1b (key facts/events), 1c (sequence), "
+        "1d (inference), 1e (prediction). ALL questions 1 mark — no exceptions. "
+        "Heavy use of tick_one (4 options in a 2×2 grid) and short open_line. "
+        "Inference: simple deduction — 'This tells you... Tick one.' style. "
+        "Do not use draw_lines_matching, true_false_table, or numbered_list. "
+        "8–10 questions per passage."
+    ),
+    "Y2": (
+        "KS1 content domains: 1a (vocabulary), 1b (key facts/events), 1c (sequence), "
+        "1d (inference), 1e (prediction). Mix of 1-mark and 2-mark questions. "
+        "Core types: tick_one, find_and_copy, open_line (short written answer). "
+        "2-mark types: true_false_table (4 statements), numbered_list (write two reasons, 1 mark each). "
+        "1-mark list: numbered_list (write two things, 1 mark total for any correct answer). "
+        "draw_lines_matching: 1 mark, ALL pairs must be correct — use once per passage maximum. "
+        "No question over 2 marks. Target 8–9 questions per passage, ~10 marks total."
+    ),
     "Y4": (
         "Full 2a–2h content domain at Y4 level. Balance retrieval, vocabulary and "
         "inference. Inference: unstated meaning, author viewpoint. Vocabulary: "
@@ -64,6 +97,15 @@ YG_QUESTION_GUIDANCE = {
 }
 
 YG_SUPPORTED_GUIDANCE = {
+    "Y1": (
+        "Supported version: identical to standard — the combined Paper 1 layout already "
+        "reduces cognitive load by placing text alongside questions. No additional changes."
+    ),
+    "Y2": (
+        "Supported version pitched at Year 1 reading level: very short sentences, common "
+        "everyday words only. For open_line questions provide a sentence starter scaffold. "
+        "Keep format identical to standard version."
+    ),
     "Y4": (
         "Supported version pitched at Year 1/2 reading level: shorter sentences, "
         "simpler synonyms substituted for harder words, generous scaffolding and "
@@ -104,6 +146,7 @@ QUESTION_LAYOUTS = {
     "Reason & evidence (3 marks)":     "reason_evidence_table",
     "Two-part question (a/b)":         "two_part_ab",
     "Find and copy blank":             "find_and_copy",
+    "Draw lines to match":             "draw_lines_matching",
 }
 
 FORMAT_REFERENCE = """
@@ -149,6 +192,20 @@ reason_evidence_table  Two-column table (Reason | Evidence). One example row pre
 two_part_ab        Two sub-questions (a) and (b), each worth 1 mark.
                    format_data: { "parts":[{"label":"a","question":"...","answer":"..."},
                                            {"label":"b","question":"...","answer":"..."}] }
+
+draw_lines_matching  Left column of sentence stems, right column of completions (already shuffled).
+                   Pupil draws lines to match each stem to its correct completion.
+                   format_data: {
+                     "left_items":  ["stem 1…", "stem 2…", "stem 3…"],
+                     "right_items": ["completion B", "completion C", "completion A"],
+                     "correct_pairs": [[0,2],[1,0],[2,1]]
+                   }
+                   correct_pairs: list of [left_index, right_index] pairs (right index into
+                   right_items as displayed — i.e. already shuffled order).
+                   right_items MUST be in shuffled order (not aligned to left_items).
+                   Question: "Draw N lines to match each [X] with the correct [Y]."
+                   Always 1 mark, awarded only if ALL pairs correct.
+                   KS1 only — do not use in KS2 Lesson Mode or KS2 Reading Paper Mode.
 
 QUESTION WRITING RULES:
 - Every question must include "text_reference" scoping the reader to the relevant passage:
@@ -466,6 +523,7 @@ def _call_api(system_prompt, user_prompt, max_tokens=8000):
 VALID_FORMATS = {
     "open_line", "find_and_copy", "numbered_list", "tick_one", "tick_two",
     "true_false_table", "sequencing", "reason_evidence_table", "two_part_ab",
+    "draw_lines_matching",
 }
 
 REQUIRED_FORMAT_DATA = {
@@ -478,6 +536,7 @@ REQUIRED_FORMAT_DATA = {
     "sequencing":            {"items"},
     "reason_evidence_table": {"example", "rows"},
     "two_part_ab":           {"parts"},
+    "draw_lines_matching":   {"left_items", "right_items", "correct_pairs"},
 }
 
 
@@ -623,3 +682,262 @@ def generate_reading_paper(
     data = _call_api(READING_PAPER_SYSTEM_PROMPT, prompt, max_tokens=min(max_tok, 12000))
     _validate_reading_paper(data, num_questions)
     return data
+
+
+# ---------------------------------------------------------------------------
+# KS1 READING PAPER MODE
+# ---------------------------------------------------------------------------
+
+KS1_WORD_COUNTS = {
+    "Y1": "280–380",
+    "Y2": "350–500",
+}
+
+# KS1 Paper 2 (separate text + answer booklet) — uses existing flat question schema
+# but with KS1-specific guidance injected via year group constants.
+
+KS1_PAPER2_SYSTEM_PROMPT = f"""You are an expert KS1 reading comprehension question writer for Year 1/2 pupils (age 5–7) in England, working to national KS1 assessment conventions.
+
+You will generate ONE reading passage and a set of comprehension questions for a KS1 Paper 2 (separate reading booklet and answer booklet).
+
+TEXT:
+- Write the text yourself. Do not ask for it.
+- Fiction: clear narrative, short paragraphs, dialogue optional.
+- Non-fiction: 3–4 subheaded sections (format: **Heading** on own line) plus optional bullet/fact section.
+- Poetry: short verse, 12–20 lines, 2–4 stanzas.
+- The text goes in the top-level "standard_text" field.
+- Total length determined by TEXT_LENGTH in the user message.
+
+{FORMAT_REFERENCE}
+
+KS1 MARK SCHEME CONVENTIONS:
+- open_line answers: provide 2–4 acceptable phrasings separated by " / ".
+  Also include "do_not_accept" field (string) for common wrong answers where relevant.
+- tick_one: one correct answer, three plausible distractors.
+- find_and_copy: exact word(s) from the text verbatim.
+- true_false_table: 4 statements, mix of true and false; 2 marks (all 4 correct) or 1 mark (3 correct).
+- numbered_list (write two things, 1 mark total): answer field gives both acceptable items as "item1 / item2".
+- numbered_list (write two reasons, 2 marks): answer field gives items separated by " / ", 1 mark each.
+- draw_lines_matching: answer field summarises the correct pairs as "left→right" entries separated by "; ".
+
+QUESTION WRITING RULES:
+- text_reference: reference section headings for non-fiction ("Look at the section: X"),
+  or paragraph beginnings for fiction ("Look at the paragraph beginning: X...").
+  Use "(pages X–Y)" style only for whole-text questions.
+- For vocabulary questions (tick_one or find_and_copy), quote the target word/phrase in the question.
+- Tick one questions: instruction is "Tick one." at end of question. Four options.
+- Keep question language at KS1 level — short, direct sentences.
+- Do not use "pupils". Do not say "evaluate" or "analyse".
+- supported_scaffold: for open_line questions provide a brief sentence starter; null for all other formats.
+
+OUTPUT: Valid JSON only — no preamble, no markdown fences.
+
+{{
+  "key_question": "...",
+  "standard_text": "...",
+  "questions": [
+    {{
+      "number": 1,
+      "type": "retrieval",
+      "format": "open_line",
+      "marks": 1,
+      "text_reference": "...",
+      "question": "...",
+      "answer": "...",
+      "do_not_accept": "",
+      "supported_scaffold": "The text says...",
+      "format_data": {{"lines": 1}}
+    }}
+  ]
+}}
+"""
+
+
+# KS1 Paper 1 (combined text + questions) — requires chunked text schema
+KS1_PAPER1_SYSTEM_PROMPT = f"""You are an expert KS1 reading comprehension question writer for Year 1/2 pupils (age 5–7) in England, working to national KS1 assessment conventions.
+
+You will generate ONE reading passage for a KS1 Paper 1 (combined booklet where text and questions appear on the same pages).
+
+The passage is divided into SECTIONS. Each section has:
+1. A short text chunk (50–100 words) — a natural paragraph or section break
+2. 1–2 questions (never more than 2 per chunk)
+
+ALL questions are worth exactly 1 mark. No 2-mark questions in Paper 1.
+
+ALLOWED FORMATS in Paper 1:
+- open_line (lines: 1 only)
+- tick_one (4 options)
+- find_and_copy
+
+Do NOT use: true_false_table, numbered_list, draw_lines_matching, tick_two, sequencing, reason_evidence_table, two_part_ab.
+
+TEXT RULES:
+- Fiction: 4–6 sections of 50–100 words each (~350–450 words total).
+- Non-fiction: 3–5 sections with bold subheadings (**Heading**) (~300–420 words total).
+- Poetry: 3–5 stanzas of 4–6 lines each, one or two questions per stanza.
+- Maintain narrative/thematic flow across all sections.
+
+QUESTION RULES (Paper 1):
+- No text_reference field — text is printed directly above the question.
+- answer field: 2–4 acceptable phrasings separated by " / ".
+- supported_scaffold: null for all questions (Paper 1 layout already reduces cognitive load).
+- tick_one: "Tick one." instruction, four options, one correct.
+- find_and_copy: exact word from the text chunk above.
+
+OUTPUT: Valid JSON only — no preamble, no markdown fences.
+
+{{
+  "title": "...",
+  "text_type": "fiction|non_fiction|poetry",
+  "sections": [
+    {{
+      "text_chunk": "...",
+      "questions": [
+        {{
+          "number": 1,
+          "format": "open_line",
+          "marks": 1,
+          "question": "...",
+          "answer": "...",
+          "supported_scaffold": null,
+          "format_data": {{"lines": 1}}
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+
+def _build_ks1_paper2_prompt(topic, text_type, year_group, context=""):
+    word_count = KS1_WORD_COUNTS.get(year_group, "350–500")
+    yg_text = YG_TEXT_GUIDANCE.get(year_group, YG_TEXT_GUIDANCE["Y2"])
+    yg_q    = YG_QUESTION_GUIDANCE.get(year_group, YG_QUESTION_GUIDANCE["Y2"])
+    yg_sup  = YG_SUPPORTED_GUIDANCE.get(year_group, YG_SUPPORTED_GUIDANCE["Y2"])
+    context_line = f"\nCURRICULUM CONTEXT: {context}" if context.strip() else ""
+    q_count = "8–9" if year_group == "Y2" else "8–10"
+    return f"""YEAR GROUP: {year_group}
+TOPIC: {topic}
+TEXT TYPE: {text_type}{context_line}
+TEXT_LENGTH: {word_count} words
+TEXT GUIDANCE: {yg_text}
+QUESTION GUIDANCE: {yg_q}
+SUPPORTED VERSION: {yg_sup}
+NUMBER OF QUESTIONS: {q_count} (targeting ~10 marks total)
+
+Generate {q_count} questions now. ONLY valid JSON — no markdown fences."""
+
+
+def _validate_ks1_paper2_passage(data, passage_label=""):
+    if not data.get("standard_text", "").strip():
+        raise ValueError(f"{passage_label}: missing standard_text")
+    qs = data.get("questions", [])
+    if not (6 <= len(qs) <= 12):
+        raise ValueError(f"{passage_label}: expected 6–12 questions, got {len(qs)}")
+    for q in qs:
+        _validate_question(q, lesson_label=passage_label)
+        # KS1 mark cap
+        if q.get("marks", 1) > 2:
+            raise ValueError(f"{passage_label} Q{q.get('number','?')}: KS1 max 2 marks")
+
+
+def _validate_ks1_paper1_passage(data, passage_label=""):
+    if not data.get("title", "").strip():
+        raise ValueError(f"{passage_label}: missing title")
+    sections = data.get("sections", [])
+    if not (3 <= len(sections) <= 7):
+        raise ValueError(f"{passage_label}: expected 3–7 sections, got {len(sections)}")
+    q_num = 0
+    for i, section in enumerate(sections):
+        if not section.get("text_chunk", "").strip():
+            raise ValueError(f"{passage_label} section {i+1}: missing text_chunk")
+        qs = section.get("questions", [])
+        if not (1 <= len(qs) <= 2):
+            raise ValueError(f"{passage_label} section {i+1}: expected 1–2 questions")
+        for q in qs:
+            q_num += 1
+            fmt = q.get("format", "")
+            if fmt not in ("open_line", "tick_one", "find_and_copy"):
+                raise ValueError(
+                    f"{passage_label} section {i+1}: Paper 1 format '{fmt}' not allowed"
+                )
+            if q.get("marks", 1) != 1:
+                raise ValueError(
+                    f"{passage_label} section {i+1}: Paper 1 questions must be 1 mark"
+                )
+
+
+def _build_ks1_paper1_prompt(topic, text_type, year_group, context=""):
+    word_count = KS1_WORD_COUNTS.get(year_group, "350–450")
+    yg_text = YG_TEXT_GUIDANCE.get(year_group, YG_TEXT_GUIDANCE["Y2"])
+    context_line = f"\nCURRICULUM CONTEXT: {context}" if context.strip() else ""
+    return f"""YEAR GROUP: {year_group}
+TOPIC: {topic}
+TEXT TYPE: {text_type}{context_line}
+TEXT_LENGTH per passage: {word_count} words total, divided into 4–6 chunks of 50–100 words each
+TEXT GUIDANCE: {yg_text}
+
+Generate the passage now. ONLY valid JSON — no markdown fences."""
+
+
+def generate_ks1_paper(
+    topic1: str,
+    text_type1: str,
+    topic2: str,
+    text_type2: str,
+    paper_type: str = "separate",
+    year_group: str = "Y2",
+    context: str = "",
+) -> dict:
+    """
+    KS1 Reading Paper generator.
+    paper_type: "separate"  → Paper 2 (text booklet + answer booklet)
+                "combined"  → Paper 1 (text and questions on same pages)
+    Returns:
+      {
+        "paper_type": "separate"|"combined",
+        "passage1": {...},   # standard_text+questions for separate; title+sections for combined
+        "passage2": {...},
+      }
+    """
+    if paper_type == "combined":
+        system = KS1_PAPER1_SYSTEM_PROMPT
+        p1 = _call_api(system,
+                       _build_ks1_paper1_prompt(topic1, text_type1, year_group, context),
+                       max_tokens=8000)
+        _validate_ks1_paper1_passage(p1, "Passage 1")
+
+        p2 = _call_api(system,
+                       _build_ks1_paper1_prompt(topic2, text_type2, year_group, context),
+                       max_tokens=8000)
+        _validate_ks1_paper1_passage(p2, "Passage 2")
+
+        # Renumber questions across passages (P2 continues from P1)
+        offset = sum(len(s.get("questions", [])) for s in p1.get("sections", []))
+        for section in p2.get("sections", []):
+            for q in section.get("questions", []):
+                q["number"] = q.get("number", 0) + offset
+
+    else:  # separate (Paper 2)
+        system = KS1_PAPER2_SYSTEM_PROMPT
+        p1 = _call_api(system,
+                       _build_ks1_paper2_prompt(topic1, text_type1, year_group, context),
+                       max_tokens=8000)
+        _validate_ks1_paper2_passage(p1, "Passage 1")
+
+        p2 = _call_api(system,
+                       _build_ks1_paper2_prompt(topic2, text_type2, year_group, context),
+                       max_tokens=8000)
+        _validate_ks1_paper2_passage(p2, "Passage 2")
+
+        # Renumber questions across passages
+        offset = len(p1.get("questions", []))
+        for q in p2.get("questions", []):
+            q["number"] = q.get("number", 0) + offset
+
+    return {
+        "paper_type": paper_type,
+        "passage1": p1,
+        "passage2": p2,
+        "year_group": year_group,
+    }

@@ -43,6 +43,8 @@ TICK_CELL  = (0.85,  0.95,  0.85 )  # answer highlight cell
 
 # Year group brand colours (kept separate from BOX_BORDER so set_year_group can override)
 _YG_COLOURS = {
+    "Y1": (0.898, 0.490, 0.141),  # #e57d24 — Beech (shared with Y5)
+    "Y2": (0.169, 0.682, 0.384),  # #2bae62 — Willow (shared with Y6)
     "Y4": (0.090, 0.596, 0.827),  # #1798d3
     "Y5": (0.898, 0.490, 0.141),  # #e57d24
     "Y6": (0.169, 0.682, 0.384),  # #2bae62
@@ -742,6 +744,126 @@ def render_two_part_ab_answer(c, q, y):
     return y - 2 * mm
 
 
+# ---------------------------------------------------------------------------
+# Draw-lines-matching renderers (KS1 only)
+# ---------------------------------------------------------------------------
+
+_DLM_COL_W  = None   # computed per call
+_DLM_GAP_W  = None
+_DLM_BOX_H  = 9 * mm
+_DLM_DOT_R  = 1.2 * mm
+
+
+def _dlm_geometry():
+    col_w = CW * 0.43
+    gap_w = CW * 0.14
+    return col_w, gap_w
+
+
+def _dlm_draw_boxes(c, left_items, right_items, y_top, draw_right_filled=False):
+    """Draw the two columns of boxes. Returns list of (left_dot_x, left_dot_y) and
+    (right_dot_x, right_dot_y) per row, plus final y."""
+    col_w, gap_w = _dlm_geometry()
+    box_h = _DLM_BOX_H
+    r_col_x = MARGIN + col_w + gap_w
+
+    left_dots  = []
+    right_dots = []
+    y = y_top
+
+    n_rows = max(len(left_items), len(right_items))
+    for i in range(n_rows):
+        # Left box
+        if i < len(left_items):
+            c.setStrokeColorRGB(*GREY_LINE)
+            c.setLineWidth(0.4)
+            c.setFillColorRGB(1, 1, 1)
+            c.rect(MARGIN, y - box_h, col_w, box_h, fill=1, stroke=1)
+            c.setFillColorRGB(*DARK)
+            c.setFont("Helvetica", 8)
+            txt = left_items[i]
+            t_lines = wrap_text(c, txt, "Helvetica", 8, col_w - 4 * mm)
+            line_h = 8 * 1.3
+            t_top = y - (box_h - len(t_lines) * line_h) / 2 - line_h * 0.15
+            for j, ln in enumerate(t_lines):
+                c.drawString(MARGIN + 2 * mm, t_top - j * line_h, ln)
+
+        # Left dot (right edge of left box, vertically centred)
+        ld_x = MARGIN + col_w
+        ld_y = y - box_h / 2
+        c.setFillColorRGB(*DARK)
+        c.circle(ld_x, ld_y, _DLM_DOT_R, fill=1, stroke=0)
+        left_dots.append((ld_x, ld_y))
+
+        # Right box
+        if i < len(right_items):
+            c.setStrokeColorRGB(*GREY_LINE)
+            c.setLineWidth(0.4)
+            fill_col = TICK_CELL if draw_right_filled else (1, 1, 1)
+            c.setFillColorRGB(*fill_col)
+            c.rect(r_col_x, y - box_h, col_w, box_h, fill=1, stroke=1)
+            c.setFillColorRGB(*DARK if not draw_right_filled else GREEN)
+            c.setFont("Helvetica", 8)
+            txt = right_items[i]
+            t_lines = wrap_text(c, txt, "Helvetica", 8, col_w - 4 * mm)
+            t_top = y - (box_h - len(t_lines) * 8 * 1.3) / 2 - 8 * 1.3 * 0.15
+            for j, ln in enumerate(t_lines):
+                c.drawString(r_col_x + 2 * mm, t_top - j * 8 * 1.3, ln)
+
+        # Right dot (left edge of right box, vertically centred)
+        rd_x = r_col_x
+        rd_y = y - box_h / 2
+        c.setFillColorRGB(*DARK)
+        c.circle(rd_x, rd_y, _DLM_DOT_R, fill=1, stroke=0)
+        right_dots.append((rd_x, rd_y))
+
+        y -= box_h + 1.5 * mm
+
+    return left_dots, right_dots, y
+
+
+def render_draw_lines_matching_pupil(c, q, y):
+    """Pupil version — boxes and dots, no lines drawn."""
+    fd = q['format_data']
+    left_items  = fd.get('left_items', [])
+    right_items = fd.get('right_items', [])
+    _, _, y = _dlm_draw_boxes(c, left_items, right_items, y)
+    return y - 2 * mm
+
+
+def render_draw_lines_matching_answer(c, q, y):
+    """Answer/mark scheme version — boxes, dots, and correct lines in green."""
+    fd = q['format_data']
+    left_items   = fd.get('left_items', [])
+    right_items  = fd.get('right_items', [])
+    correct_pairs = fd.get('correct_pairs', [])
+
+    left_dots, right_dots, y_end = _dlm_draw_boxes(
+        c, left_items, right_items, y, draw_right_filled=False
+    )
+
+    # Draw connecting lines
+    c.setStrokeColorRGB(*GREEN)
+    c.setLineWidth(1.2)
+    for (li, ri) in correct_pairs:
+        if li < len(left_dots) and ri < len(right_dots):
+            lx, ly = left_dots[li]
+            rx, ry = right_dots[ri]
+            c.line(lx, ly, rx, ry)
+
+    # Tick mark beside each right box
+    col_w, gap_w = _dlm_geometry()
+    r_col_x = MARGIN + col_w + gap_w
+    for (li, ri) in correct_pairs:
+        if ri < len(right_dots):
+            _, ry = right_dots[ri]
+            c.setFont("Helvetica-Bold", 8)
+            c.setFillColorRGB(*GREEN)
+            c.drawString(MARGIN + CW - 6 * mm, ry - 3, "\u2714")
+
+    return y_end - 2 * mm
+
+
 # ===========================================================================
 # Height estimation (for pupil/answer overflow checking)
 # ===========================================================================
@@ -774,6 +896,9 @@ def estimate_height(c, q):
         body_h = 6 * mm + (fd.get('rows', 2) + 1) * 11 * mm + 2 * mm
     elif fmt == 'two_part_ab':
         body_h = len(fd.get('parts', [])) * (8.5 * 1.35 + 10 * mm) + 2 * mm
+    elif fmt == 'draw_lines_matching':
+        n_rows = max(len(fd.get('left_items', [])), len(fd.get('right_items', [])))
+        body_h = n_rows * (_DLM_BOX_H + 1.5 * mm) + 2 * mm
     else:
         body_h = 13 * mm
 
@@ -803,6 +928,9 @@ def _ms_award_text(marks, fmt='open_line', n_items=None):
     if fmt == 'sequencing':
         return ["Award 1 mark for the complete correct sequence."]
 
+    if fmt == 'draw_lines_matching':
+        return ["Award 1 mark for all lines joined to the correct boxes."]
+
     if fmt == 'true_false_table':
         if marks <= 1:
             return ([f"Award 1 mark for all {n} correct."] if n
@@ -814,7 +942,11 @@ def _ms_award_text(marks, fmt='open_line', n_items=None):
     if fmt == 'two_part_ab':
         return ["Award 1 mark per part (up to 2 marks)."]
 
-    # open_line, numbered_list, reason_evidence_table
+    # numbered_list: 1 mark = "write two things" (any correct answer earns the mark)
+    if fmt == 'numbered_list' and marks == 1:
+        return ["Award 1 mark for any correct answer (or both)."]
+
+    # open_line, numbered_list (2+ marks), reason_evidence_table
     if marks == 1:
         return ["Award 1 mark for an acceptable answer."]
     if marks == 2:
@@ -969,7 +1101,8 @@ def estimate_ms_height(c, q):
     award_h = award_lines * 8 * 1.35 + 2 * mm
 
     # Simple formats — compact body + award header
-    if fmt in ('tick_one', 'tick_two', 'true_false_table', 'find_and_copy', 'sequencing'):
+    if fmt in ('tick_one', 'tick_two', 'true_false_table', 'find_and_copy',
+               'sequencing', 'draw_lines_matching'):
         return stem_h + award_h + estimate_height(c, q) + 5 * mm
 
     if fmt == 'open_line' and marks == 1:
@@ -1018,6 +1151,8 @@ def render_ms_question(c, q, y):
         return render_find_and_copy_answer(c, q, y) - 3 * mm
     if fmt == 'sequencing':
         return render_sequencing_answer(c, q, y) - 3 * mm
+    if fmt == 'draw_lines_matching':
+        return render_draw_lines_matching_answer(c, q, y) - 3 * mm
     if fmt == 'open_line' and marks == 1:
         return render_open_line_answer(c, q, y) - 3 * mm
 
@@ -1051,6 +1186,7 @@ def render_question(c, q, y, is_answer, is_supported):
             'sequencing':             lambda: render_sequencing_answer(c, q, y),
             'reason_evidence_table':  lambda: render_reason_evidence_answer(c, q, y),
             'two_part_ab':            lambda: render_two_part_ab_answer(c, q, y),
+            'draw_lines_matching':    lambda: render_draw_lines_matching_answer(c, q, y),
         }
     else:
         dispatch = {
@@ -1063,6 +1199,7 @@ def render_question(c, q, y, is_answer, is_supported):
             'sequencing':             lambda: render_sequencing_pupil(c, q, y),
             'reason_evidence_table':  lambda: render_reason_evidence_pupil(c, q, y),
             'two_part_ab':            lambda: render_two_part_ab_pupil(c, q, y, is_supported),
+            'draw_lines_matching':    lambda: render_draw_lines_matching_pupil(c, q, y),
         }
 
     renderer = dispatch.get(fmt)
@@ -1600,3 +1737,322 @@ def build_reading_paper_pdfs(
         "questions":   out_q,
         "mark_scheme": out_ms,
     }
+
+
+# ===========================================================================
+# KS1 PDF builders
+# ===========================================================================
+
+def _ks1_page_header(c, title, subtitle, is_first, is_ms=False):
+    """Draw header for KS1 paper pages. Returns starting y."""
+    y = H - MARGIN - 2 * mm
+    if is_first:
+        c.setFont("Helvetica-Bold", 11)
+        c.setFillColorRGB(*_ACCENT)
+        c.drawString(MARGIN, y, title)
+        if subtitle:
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(*DARK)
+            c.drawRightString(MARGIN + CW, y, subtitle)
+        y -= 11 * 1.4 + 1 * mm
+        c.setStrokeColorRGB(*GREY_LINE)
+        c.setLineWidth(0.4)
+        c.line(MARGIN, y, MARGIN + CW, y)
+        y -= 4 * mm
+    else:
+        c.setFont("Helvetica-Oblique", 7.5)
+        c.setFillColorRGB(0.5, 0.5, 0.5)
+        cont = f"{title} — continued…"
+        c.drawRightString(MARGIN + CW, y + 1 * mm, cont)
+        y -= 5 * mm
+    return y
+
+
+def _ks1_passage_title_band(c, passage_title, text_type_label, y):
+    """Draw a coloured band marking the start of a new passage."""
+    band_h = 8 * mm
+    c.setFillColorRGB(*_ACCENT)
+    c.rect(MARGIN, y - band_h, CW, band_h, fill=1, stroke=0)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(MARGIN + 3 * mm, y - band_h + 2.5 * mm, passage_title)
+    if text_type_label:
+        c.setFont("Helvetica", 8)
+        c.drawRightString(MARGIN + CW - 3 * mm, y - band_h + 2.5 * mm, text_type_label)
+    return y - band_h - 3 * mm
+
+
+def _ks1_questions_for_passage(c, questions, y, passage_title,
+                                is_answer, is_supported, tmp, pages):
+    """
+    Render a flat list of questions for a passage, handling page breaks.
+    Returns final y.
+    """
+    page_num = [len(pages) + 1]
+
+    def new_page():
+        c_new_path = os.path.join(tmp, f"ks1_q_p{page_num[0]}.pdf")
+        page_num[0] += 1
+        c_new = rl_canvas.Canvas(c_new_path, pagesize=A4)
+        y_new = _ks1_page_header(c_new, passage_title, "", is_first=False)
+        return c_new, y_new, c_new_path
+
+    for q in questions:
+        result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
+        if result is None:
+            c.save()
+            pages.append(None)  # placeholder — caller must track path
+            c, y, _ = new_page()
+            result = render_question(c, q, y, is_answer=is_answer, is_supported=is_supported)
+            if result is None:
+                result = y - 25 * mm
+        y = result
+
+    return c, y
+
+
+def build_ks1_paper2_pdfs(
+    content: dict,
+    output_dir: str,
+    year_group: str = "Y2",
+) -> dict:
+    """
+    Build KS1 Paper 2 PDFs (separate text booklet + answer booklet).
+    content: output of generate_ks1_paper() with paper_type="separate"
+    Returns: { "text": path, "questions": path, "supported": path, "mark_scheme": path }
+    """
+    import tempfile, shutil as _shutil
+
+    set_year_group(year_group)
+    tmp = tempfile.mkdtemp()
+
+    p1 = content["passage1"]
+    p2 = content["passage2"]
+
+    p1_title = p1.get("key_question", "") or "Passage 1"
+    p2_title = p2.get("key_question", "") or "Passage 2"
+
+    paper_label = f"KS1 Reading Paper ({year_group})"
+    ms_label    = f"Mark Scheme — KS1 Reading Paper ({year_group})"
+
+    # ── Text booklet ──────────────────────────────────────────────────────────
+    txt_pages = []
+    for idx, (passage, ptitle) in enumerate([(p1, p1_title), (p2, p2_title)], 1):
+        txt_pages += _build_reading_paper_text_pages(
+            tmp, passage.get("standard_text", ""),
+            ptitle, font_size=11,
+        )
+
+    # ── Answer booklet (standard) ─────────────────────────────────────────────
+    def _build_answer_booklet(is_supported):
+        pages_out  = []
+        page_count = [0]
+
+        def new_page(is_first):
+            page_count[0] += 1
+            p = os.path.join(tmp, f"ks1_{'sup' if is_supported else 'std'}_{page_count[0]}.pdf")
+            c = rl_canvas.Canvas(p, pagesize=A4)
+            sub = "Name: ___________________________" if is_first else ""
+            y = _ks1_page_header(c, paper_label, sub, is_first=is_first)
+            return c, y, p
+
+        c, y, path = new_page(is_first=True)
+
+        for passage, ptitle, all_qs in [
+            (p1, p1_title, p1.get("questions", [])),
+            (p2, p2_title, p2.get("questions", [])),
+        ]:
+            # Passage title band
+            if y < MARGIN + 40 * mm:
+                c.save()
+                pages_out.append(path)
+                c, y, path = new_page(is_first=False)
+
+            y = _ks1_passage_title_band(c, ptitle, "", y)
+
+            for q in all_qs:
+                result = render_question(c, q, y,
+                                         is_answer=False,
+                                         is_supported=is_supported)
+                if result is None:
+                    c.save()
+                    pages_out.append(path)
+                    c, y, path = new_page(is_first=False)
+                    result = render_question(c, q, y,
+                                             is_answer=False,
+                                             is_supported=is_supported)
+                    if result is None:
+                        result = y - 25 * mm
+                y = result
+
+        c.save()
+        pages_out.append(path)
+        return pages_out
+
+    std_pages = _build_answer_booklet(is_supported=False)
+    sup_pages = _build_answer_booklet(is_supported=True)
+
+    # ── Mark scheme ───────────────────────────────────────────────────────────
+    ms_pages   = []
+    ms_count   = [0]
+
+    def new_ms_page(is_first):
+        ms_count[0] += 1
+        p = os.path.join(tmp, f"ks1_ms_{ms_count[0]}.pdf")
+        c = rl_canvas.Canvas(p, pagesize=A4)
+        y = _ks1_page_header(c, ms_label, f"for {paper_label}", is_first=is_first)
+        return c, y, p
+
+    c, y, path = new_ms_page(is_first=True)
+
+    for passage, ptitle, all_qs in [
+        (p1, p1_title, p1.get("questions", [])),
+        (p2, p2_title, p2.get("questions", [])),
+    ]:
+        if y < MARGIN + 40 * mm:
+            c.save()
+            ms_pages.append(path)
+            c, y, path = new_ms_page(is_first=False)
+        y = _ks1_passage_title_band(c, ptitle, "", y)
+
+        for q in all_qs:
+            result = render_ms_question(c, q, y)
+            if result is None:
+                c.save()
+                ms_pages.append(path)
+                c, y, path = new_ms_page(is_first=False)
+                result = render_ms_question(c, q, y)
+                if result is None:
+                    result = y - 25 * mm
+            y = result
+
+    c.save()
+    ms_pages.append(path)
+
+    # ── Merge ─────────────────────────────────────────────────────────────────
+    os.makedirs(output_dir, exist_ok=True)
+    out_text = os.path.join(output_dir, "KS1_Text.pdf")
+    out_std  = os.path.join(output_dir, "KS1_Questions.pdf")
+    out_sup  = os.path.join(output_dir, "KS1_Questions_Supported.pdf")
+    out_ms   = os.path.join(output_dir, "KS1_MarkScheme.pdf")
+
+    merge_pdfs(txt_pages, out_text)
+    merge_pdfs(std_pages, out_std)
+    merge_pdfs(sup_pages, out_sup)
+    merge_pdfs(ms_pages,  out_ms)
+
+    _shutil.rmtree(tmp)
+    return {"text": out_text, "questions": out_std,
+            "supported": out_sup, "mark_scheme": out_ms}
+
+
+def build_ks1_paper1_pdfs(
+    content: dict,
+    output_dir: str,
+    year_group: str = "Y2",
+) -> dict:
+    """
+    Build KS1 Paper 1 PDFs (combined text + questions booklet).
+    content: output of generate_ks1_paper() with paper_type="combined"
+    Returns: { "combined": path, "mark_scheme": path }
+    """
+    import tempfile, shutil as _shutil
+
+    set_year_group(year_group)
+    tmp = tempfile.mkdtemp()
+
+    p1 = content["passage1"]
+    p2 = content["passage2"]
+
+    paper_label = f"KS1 Reading Paper ({year_group})"
+    ms_label    = f"Mark Scheme — KS1 Reading Paper ({year_group})"
+
+    def _build_combined(is_ms):
+        pages_out = []
+        pg_count  = [0]
+
+        def new_page(is_first):
+            pg_count[0] += 1
+            p = os.path.join(tmp, f"ks1_p1_{'ms' if is_ms else 'std'}_{pg_count[0]}.pdf")
+            c = rl_canvas.Canvas(p, pagesize=A4)
+            title = ms_label if is_ms else paper_label
+            sub = ("" if is_ms else
+                   "Name: ___________________________" if is_first else "")
+            y = _ks1_page_header(c, title, sub, is_first=is_first)
+            return c, y, p
+
+        c, y, path = new_page(is_first=True)
+
+        for passage in [p1, p2]:
+            ptitle = passage.get("title", "")
+            ptype  = passage.get("text_type", "")
+            type_label = {"fiction": "Fiction", "non_fiction": "Non-fiction",
+                          "poetry": "Poetry"}.get(ptype, "")
+
+            if y < MARGIN + 50 * mm:
+                c.save()
+                pages_out.append(path)
+                c, y, path = new_page(is_first=False)
+
+            y = _ks1_passage_title_band(c, ptitle, type_label, y)
+
+            for section in passage.get("sections", []):
+                chunk = section.get("text_chunk", "")
+                qs    = section.get("questions", [])
+
+                # Estimate space needed for this section
+                chunk_h = draw_text_box(c, chunk, y_top=y, font_size=10) if False else 0
+                # Just check if we need a new page (rough estimate)
+                rough_h = len(chunk.split()) * 1.4 + len(qs) * 25 * mm
+                if rough_h > 200 * mm and y < MARGIN + 60 * mm:
+                    c.save()
+                    pages_out.append(path)
+                    c, y, path = new_page(is_first=False)
+
+                # Draw text chunk in a box
+                if chunk.strip():
+                    y = draw_text_box(c, chunk, y_top=y, font_size=10)
+                    y -= 2 * mm
+
+                # Draw questions
+                for q in qs:
+                    # Paper 1 combined: suppress text_reference display
+                    q_copy = dict(q)
+                    q_copy['text_reference'] = ''
+
+                    if is_ms:
+                        result = render_ms_question(c, q_copy, y)
+                    else:
+                        result = render_question(c, q_copy, y,
+                                                  is_answer=False, is_supported=False)
+                    if result is None:
+                        c.save()
+                        pages_out.append(path)
+                        c, y, path = new_page(is_first=False)
+                        if is_ms:
+                            result = render_ms_question(c, q_copy, y)
+                        else:
+                            result = render_question(c, q_copy, y,
+                                                      is_answer=False, is_supported=False)
+                        if result is None:
+                            result = y - 25 * mm
+                    y = result
+
+                y -= 3 * mm  # small gap between sections
+
+        c.save()
+        pages_out.append(path)
+        return pages_out
+
+    combined_pages = _build_combined(is_ms=False)
+    ms_pages       = _build_combined(is_ms=True)
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_combined = os.path.join(output_dir, "KS1_Combined.pdf")
+    out_ms       = os.path.join(output_dir, "KS1_MarkScheme.pdf")
+
+    merge_pdfs(combined_pages, out_combined)
+    merge_pdfs(ms_pages,       out_ms)
+
+    _shutil.rmtree(tmp)
+    return {"combined": out_combined, "mark_scheme": out_ms}
