@@ -22,6 +22,8 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.units import mm
 from pypdf import PdfReader, PdfWriter
 
+from wfa_shared.brand import year_colour_rgb, hex_to_rgb, WFA_BLUE, YEAR_COLOURS
+
 # ---------------------------------------------------------------------------
 # Page geometry
 # ---------------------------------------------------------------------------
@@ -41,22 +43,15 @@ GREY_LINE  = (0.6,   0.6,   0.6  )  # ruled lines, cell borders
 LIGHT_GREY = (0.94,  0.94,  0.94 )  # table cell backgrounds
 TICK_CELL  = (0.85,  0.95,  0.85 )  # answer highlight cell
 
-# Year group brand colours (kept separate from BOX_BORDER so set_year_group can override)
-_YG_COLOURS = {
-    "Y1": (0.898, 0.490, 0.141),  # #e57d24 — Beech (shared with Y5)
-    "Y2": (0.169, 0.682, 0.384),  # #2bae62 — Willow (shared with Y6)
-    "Y4": (0.090, 0.596, 0.827),  # #1798d3
-    "Y5": (0.898, 0.490, 0.141),  # #e57d24
-    "Y6": (0.169, 0.682, 0.384),  # #2bae62
-}
+# Year group brand colours — sourced from wfa-shared
 # Active colour — updated by set_year_group(); defaults to Y4
-_ACCENT = _YG_COLOURS["Y4"]
+_ACCENT = year_colour_rgb("Y4")
 
 
 def set_year_group(year_group: str):
     """Update the active accent colour for PDF branding. Call before build_pdfs()."""
     global _ACCENT
-    _ACCENT = _YG_COLOURS.get(year_group, _YG_COLOURS["Y4"])
+    _ACCENT = year_colour_rgb(year_group)
 
 
 def _coerce_answer(q):

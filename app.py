@@ -14,6 +14,10 @@ from pathlib import Path
 
 import streamlit as st
 
+from wfa_shared import YEAR_COLOURS, WFA_BLUE, year_colour
+from wfa_shared.logo import logo_html
+from wfa_shared.streamlit_css import inject_wfa_css
+
 from content_generator import (
     generate_content,
     generate_reading_paper,
@@ -45,22 +49,12 @@ st.set_page_config(
     layout="centered",
 )
 
-LOGO_PATH     = Path("assets/wfa_logo.jpg")
 ICON_PATH     = Path("assets/reader.png")
 TEMPLATE_PATH = Path("template.pptx")
 
 KS2_YGS = ["Y4", "Y5", "Y6"]
 KS1_YGS = ["Y1", "Y2"]
 PHASES  = list(PHASE_DATA.keys())
-
-YG_COLOURS = {
-    "Y1": "#e57d24",
-    "Y2": "#2bae62",
-    "Y3": "#c0157b",
-    "Y4": "#1798d3",
-    "Y5": "#e57d24",
-    "Y6": "#2bae62",
-}
 
 PDF_MIME  = "application/pdf"
 PPTX_MIME = ("application/vnd.openxmlformats-officedocument"
@@ -78,11 +72,6 @@ def _next_weekday(weekday):
     if days_ahead <= 0:
         days_ahead += 7
     return today + timedelta(days=days_ahead)
-
-
-def _b64_img(path):
-    import base64
-    return base64.b64encode(Path(path).read_bytes()).decode()
 
 
 def _read_bytes(path):
@@ -155,35 +144,13 @@ for _k in ("bar_dl", "kp_dl", "dec_dl", "bar_preview", "kp_preview", "dec_previe
 # CSS
 # ---------------------------------------------------------------------------
 
-st.markdown("""<style>
-div[data-testid="stMainBlockContainer"] { max-width: 860px; margin: 0 auto; }
-div[data-testid="stDownloadButton"] > button {
-    border: 1.5px solid #1798d3 !important;
-    color: #1798d3 !important;
-    background: #ffffff !important;
-}
-div[data-testid="stDownloadButton"] > button:hover { background: #f0f8ff !important; }
-</style>""", unsafe_allow_html=True)
+inject_wfa_css(download=True)
 
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
 
-if LOGO_PATH.exists():
-    logo_b64 = _b64_img(LOGO_PATH)
-    st.markdown(
-        f'<div style="display:flex;align-items:center;gap:18px;margin-bottom:6px;">'
-        f'<img src="data:image/jpeg;base64,{logo_b64}" style="height:60px;width:auto;">'
-        f'<span style="font-size:1.75rem;font-weight:700;color:#1798d3;">'
-        f'WFA Reading Resources</span></div>',
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        '<span style="font-size:1.75rem;font-weight:700;color:#1798d3;">'
-        'WFA Reading Resources</span>',
-        unsafe_allow_html=True,
-    )
+st.markdown(logo_html("WFA Reading Resources"), unsafe_allow_html=True)
 st.divider()
 
 # ---------------------------------------------------------------------------
