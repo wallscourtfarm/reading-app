@@ -56,6 +56,7 @@ PHASES  = list(PHASE_DATA.keys())
 YG_COLOURS = {
     "Y1": "#e57d24",
     "Y2": "#2bae62",
+    "Y3": "#c0157b",
     "Y4": "#1798d3",
     "Y5": "#e57d24",
     "Y6": "#2bae62",
